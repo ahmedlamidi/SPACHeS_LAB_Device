@@ -19,23 +19,22 @@
 
 // #define THINGSBOARD_ENABLE_DEBUG 1
 #include <Arduino.h>
-#include <string.h>
-#include <SPI.h>
-#include <math.h>
-#include <stdio.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <time.h>
+#include <SPIFFS.h>
+#include <cmath>            // Math functions
+#include <cstdio>           // Standard I/O functions
+#include <SPI.h>             // SPI communication library
+#include <WiFi.h>            // Wi-Fi functionality
+#include <WiFiUdp.h>         // Wi-Fi UDP communication
+#include <WebServer.h>       // HTTP server
+#include <NTPClient.h>       // NTP for time synchronization
+#include <time.h>            // Time functions
+#include <ThingsBoard.h>     // ThingsBoard IoT platform
+#include <Arduino_MQTT_Client.h> // Arduino-specific MQTT client
 #include <AutoConnect.h>
-#include <NTPClient.h>
-#include <WiFiUdp.h>
-// because we are using MQTT so we need these
-#include <ThingsBoard.h>
-#include <PubSubClient.h>
-#include <Arduino_MQTT_Client.h>
 
 
-
+// change path to spiffs and use deep
+// typo in autoconnect , wrongly uses the HTTPCLient instead of HttpClient -> make changes when compiling
 //wifi and device on Thingsboard
 //#define WIFI_AP "NDSU IoT"
 //#define WIFI_PASSWORD "bacondotwager"
@@ -233,6 +232,14 @@ void rootPage(){
     Server.send(200, "text/plain", content); // send the content to the server
 }
 
+
+///////// Gets Fired on DRDY event/////////////////////////////
+ICACHE_RAM_ATTR void afe44xx_drdy_event()
+{
+    drdy_trigger = HIGH;
+}
+
+
 void setup()
 {
     Serial.begin(115200);
@@ -326,115 +333,6 @@ void setup()
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void loop()
-{
-    Portal.handleClient();
-    timeClient.update();
-
-    if (!tb.connected()) {
-        // Connect to the ThingsBoard
-        Serial.print("Connecting to: ");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(" with token ");
-        Serial.println(TOKEN);
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
-            Serial.println("Failed to connect");
-            return;
-        }
-    }
-    //voltage read
-    voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
-    percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
-    if(voltage > 4.19) percentage = 100; //upper limit
-    if(voltage < 3.5) percentage = 0; //Lower limit
-
-    //Charge logic
-    if(voltage > 4.1) digitalWrite(CHARGER, LOW);
-    if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
-
-    if(percentage < 33){
-        battStatus = 0;
-    }else if(percentage < 66){
-        battStatus = 1;
-    }else{
-        battStatus = 2;
-    }
-
-    current_time_LED = millis();                              //get current time for LED function
-    elapsed_time_LED = current_time_LED - previous_time_LED;  //calculate elapsed time for LED function
-    LEDFunction(battStatus);
-
-    // if ( !tb.connected() ) {
-    //   reconnect();
-    // }
-
-    if (drdy_trigger == HIGH)
-    {
-        //Serial.println("111111111xxxxxxx!!!");
-        detachInterrupt(SPIDRDY);
-        afe44xxWrite(CONTROL0, 0x000001);
-        IRtemp = afe44xxRead(LED1VAL);
-        afe44xxWrite(CONTROL0, 0x000001);
-        REDtemp = afe44xxRead(LED2VAL);
-        afe44xx_data_ready = true;
-    }
-
-    if (afe44xx_data_ready == true)
-    {
-        //Serial.println("xxxxxxx!!!");
-        IRtemp = (unsigned long) (IRtemp << 10);
-        seegtemp = (signed long) (IRtemp);
-        seegtemp = (signed long) (seegtemp >> 10);
-
-        REDtemp = (unsigned long) (REDtemp << 10);
-        seegtemp2 = (signed long) (REDtemp);
-        seegtemp2 = (signed long) (seegtemp2 >> 10);
-
-
-        if (dec == 20)
-        {
-            //Serial.println("xoxoxo!!!");
-            aun_ir_buffer[n_buffer_count] = (uint16_t) (seegtemp >> 4);
-            aun_red_buffer[n_buffer_count] = (uint16_t) (seegtemp2 >> 4);
-            time_stamps[n_buffer_count] = millis();
-            //send data to Thingsboard
-            getAndSendPPG(n_buffer_count, time_stamps[n_buffer_count]);
-            n_buffer_count++;
-            dec = 0;
-
-        }
-        dec++;
-
-        if (n_buffer_count > 99)
-        {
-            // Serial.println("xasdasdx!!!");
-            estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
-            if (n_spo2 == -999){
-                Serial.println("Probe error!!!!");
-                tb.sendTelemetryData("SpO2", n_spo2);
-
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            }
-            else
-            {
-
-                // Serial.print(" Sp02 : ");
-                // Serial.print(n_spo2);
-                // Serial.print("% ,");
-                // Serial.print("Pulse rate :");
-                // Serial.println(n_heart_rate);
-                tb.sendTelemetryData("SpO2", n_spo2);
-
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            }
-            n_buffer_count = 0;
-        }
-        afe44xx_data_ready = false;
-        drdy_trigger = LOW;
-        attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
-        tb.loop();
-    }
-}
 void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 {
     // Prepare a JSON payload string
@@ -442,7 +340,11 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     char PPG_data[1500];
 
     String payload = "{";
-    payload += "\"ts\": "; payload += time_stamp; payload += ",";
+    payload += "\"ts\": ";
+    char buffer[20];
+    sprintf(buffer, "%llu", time_stamp);
+    payload += buffer;
+    payload += ",";
     payload += "\"values\": ";
     payload += "{";
     payload += "\"PPG_IR\": "; payload += aun_ir_buffer[n_buffer_count]; payload += ",";
@@ -523,11 +425,6 @@ void reconnect() {
             delay( 5000 );
         }
     }
-}
-///////// Gets Fired on DRDY event/////////////////////////////
-ICACHE_RAM_ATTR void afe44xx_drdy_event()
-{
-    drdy_trigger = HIGH;
 }
 
 ////////////////AFE44xx initialization//////////////////////////////////////////
@@ -610,6 +507,118 @@ unsigned long afe44xxRead (uint8_t address)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void sort_ascend(int32_t  *pn_x, int32_t n_size)
+/**
+  \brief        Sort array
+  \par          Details
+                Sort array in ascending order (insertion sort algorithm)
+
+  \retval       None
+*/
+{
+    int32_t i, j, n_temp;
+    for (i = 1; i < n_size; i++) {
+        n_temp = pn_x[i];
+        for (j = i; j > 0 && n_temp < pn_x[j - 1]; j--)
+            pn_x[j] = pn_x[j - 1];
+        pn_x[j] = n_temp;
+    }
+}
+void find_peak_above( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height )
+/**
+  \brief        Find peaks above n_min_height
+  \par          Details
+                Find all peaks above MIN_HEIGHT
+
+  \retval       None
+*/
+{
+    int32_t i = 1, n_width;
+    *n_npks = 0;
+
+    while (i < n_size - 1) {
+        if (pn_x[i] > n_min_height && pn_x[i] > pn_x[i - 1]) {   // find left edge of potential peaks
+            n_width = 1;
+            while (i + n_width < n_size && pn_x[i] == pn_x[i + n_width]) // find flat peaks
+                n_width++;
+            if (pn_x[i] > pn_x[i + n_width] && (*n_npks) < 15 ) {   // find right edge of peaks
+                pn_locs[(*n_npks)++] = i;
+                // for flat peaks, peak location is left edge
+                i += n_width + 1;
+            }
+            else
+                i += n_width;
+        }
+        else
+            i++;
+        //  Serial.println("beat");
+    }
+}
+
+void sort_indices_descend(  int32_t  *pn_x, int32_t *pn_indx, int32_t n_size)
+/**
+  \brief        Sort indices
+  \par          Details
+                Sort indices according to descending order (insertion sort algorithm)
+
+  \retval       None
+*/
+{
+    int32_t i, j, n_temp;
+    for (i = 1; i < n_size; i++) {
+        n_temp = pn_indx[i];
+        for (j = i; j > 0 && pn_x[n_temp] > pn_x[pn_indx[j - 1]]; j--)
+            pn_indx[j] = pn_indx[j - 1];
+        pn_indx[j] = n_temp;
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void remove_close_peaks(int32_t *pn_locs, int32_t *pn_npks, int32_t *pn_x, int32_t n_min_distance)
+/**
+  \brief        Remove peaks
+  \par          Details
+                Remove peaks separated by less than MIN_DISTANCE
+
+  \retval       None
+*/
+{
+
+    int32_t i, j, n_old_npks, n_dist;
+
+    /* Order peaks from large to small */
+    sort_indices_descend( pn_x, pn_locs, *pn_npks );
+
+    for ( i = -1; i < *pn_npks; i++ ) {
+        n_old_npks = *pn_npks;
+        *pn_npks = i + 1;
+        for ( j = i + 1; j < n_old_npks; j++ ) {
+            n_dist =  pn_locs[j] - ( i == -1 ? -1 : pn_locs[i] ); // lag-zero peak of autocorr is at index -1
+            if ( n_dist > n_min_distance || n_dist < -n_min_distance )
+                pn_locs[(*pn_npks)++] = pn_locs[j];
+        }
+    }
+
+    // Resort indices int32_to ascending order
+    sort_ascend( pn_locs, *pn_npks );
+}
+
+void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height, int32_t n_min_distance, int32_t n_max_num )
+/**
+  \brief        Find peaks
+  \par          Details
+                Find at most MAX_NUM peaks above MIN_HEIGHT separated by at least MIN_DISTANCE
+
+  \retval       None
+*/
+{
+    find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
+    remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
+    *n_npks = min( *n_npks, n_max_num );
+}
+
+
 void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t *pun_red_buffer, int32_t *pn_spo2, int8_t *pch_spo2_valid, int32_t *pn_heart_rate, int8_t *pch_hr_valid , unsigned long *ts_arr)
 {
     uint32_t un_ir_mean, un_only_once ;
@@ -737,121 +746,10 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height, int32_t n_min_distance, int32_t n_max_num )
-/**
-  \brief        Find peaks
-  \par          Details
-                Find at most MAX_NUM peaks above MIN_HEIGHT separated by at least MIN_DISTANCE
-
-  \retval       None
-*/
-{
-    find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
-    remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
-    *n_npks = min( *n_npks, n_max_num );
-}
-
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void find_peak_above( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height )
-/**
-  \brief        Find peaks above n_min_height
-  \par          Details
-                Find all peaks above MIN_HEIGHT
-
-  \retval       None
-*/
-{
-    int32_t i = 1, n_width;
-    *n_npks = 0;
-
-    while (i < n_size - 1) {
-        if (pn_x[i] > n_min_height && pn_x[i] > pn_x[i - 1]) {   // find left edge of potential peaks
-            n_width = 1;
-            while (i + n_width < n_size && pn_x[i] == pn_x[i + n_width]) // find flat peaks
-                n_width++;
-            if (pn_x[i] > pn_x[i + n_width] && (*n_npks) < 15 ) {   // find right edge of peaks
-                pn_locs[(*n_npks)++] = i;
-                // for flat peaks, peak location is left edge
-                i += n_width + 1;
-            }
-            else
-                i += n_width;
-        }
-        else
-            i++;
-        //  Serial.println("beat");
-    }
-}
-
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void remove_close_peaks(int32_t *pn_locs, int32_t *pn_npks, int32_t *pn_x, int32_t n_min_distance)
-/**
-  \brief        Remove peaks
-  \par          Details
-                Remove peaks separated by less than MIN_DISTANCE
-
-  \retval       None
-*/
-{
-
-    int32_t i, j, n_old_npks, n_dist;
-
-    /* Order peaks from large to small */
-    sort_indices_descend( pn_x, pn_locs, *pn_npks );
-
-    for ( i = -1; i < *pn_npks; i++ ) {
-        n_old_npks = *pn_npks;
-        *pn_npks = i + 1;
-        for ( j = i + 1; j < n_old_npks; j++ ) {
-            n_dist =  pn_locs[j] - ( i == -1 ? -1 : pn_locs[i] ); // lag-zero peak of autocorr is at index -1
-            if ( n_dist > n_min_distance || n_dist < -n_min_distance )
-                pn_locs[(*pn_npks)++] = pn_locs[j];
-        }
-    }
-
-    // Resort indices int32_to ascending order
-    sort_ascend( pn_locs, *pn_npks );
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void sort_ascend(int32_t  *pn_x, int32_t n_size)
-/**
-  \brief        Sort array
-  \par          Details
-                Sort array in ascending order (insertion sort algorithm)
-
-  \retval       None
-*/
-{
-    int32_t i, j, n_temp;
-    for (i = 1; i < n_size; i++) {
-        n_temp = pn_x[i];
-        for (j = i; j > 0 && n_temp < pn_x[j - 1]; j--)
-            pn_x[j] = pn_x[j - 1];
-        pn_x[j] = n_temp;
-    }
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void sort_indices_descend(  int32_t  *pn_x, int32_t *pn_indx, int32_t n_size)
-/**
-  \brief        Sort indices
-  \par          Details
-                Sort indices according to descending order (insertion sort algorithm)
-
-  \retval       None
-*/
-{
-    int32_t i, j, n_temp;
-    for (i = 1; i < n_size; i++) {
-        n_temp = pn_indx[i];
-        for (j = i; j > 0 && pn_x[n_temp] > pn_x[pn_indx[j - 1]]; j--)
-            pn_indx[j] = pn_indx[j - 1];
-        pn_indx[j] = n_temp;
-    }
-}
 double ReadVoltage(uint8_t pin){
     double reading = analogRead(pin); // Reference voltage is 3v3 so maximum reading is 3v3 = 4095 in range 0 to 4095
     if(reading < 1 || reading > 4095) return 0;
@@ -902,5 +800,115 @@ void LEDFunction (int battStatus){
         }
         default:
             break;
+    }
+}
+
+void loop()
+{
+    Portal.handleClient();
+    timeClient.update();
+
+    if (!tb.connected()) {
+        // Connect to the ThingsBoard
+        Serial.print("Connecting to: ");
+        Serial.print(THINGSBOARD_SERVER);
+        Serial.print(" with token ");
+        Serial.println(TOKEN);
+        if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
+            Serial.println("Failed to connect");
+            return;
+        }
+    }
+    //voltage read
+    voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
+    percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
+    if(voltage > 4.19) percentage = 100; //upper limit
+    if(voltage < 3.5) percentage = 0; //Lower limit
+
+    //Charge logic
+    if(voltage > 4.1) digitalWrite(CHARGER, LOW);
+    if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
+
+    if(percentage < 33){
+        battStatus = 0;
+    }else if(percentage < 66){
+        battStatus = 1;
+    }else{
+        battStatus = 2;
+    }
+
+    current_time_LED = millis();                              //get current time for LED function
+    elapsed_time_LED = current_time_LED - previous_time_LED;  //calculate elapsed time for LED function
+    LEDFunction(battStatus);
+
+    // if ( !tb.connected() ) {
+    //   reconnect();
+    // }
+
+    if (drdy_trigger == HIGH)
+    {
+        //Serial.println("111111111xxxxxxx!!!");
+        detachInterrupt(SPIDRDY);
+        afe44xxWrite(CONTROL0, 0x000001);
+        IRtemp = afe44xxRead(LED1VAL);
+        afe44xxWrite(CONTROL0, 0x000001);
+        REDtemp = afe44xxRead(LED2VAL);
+        afe44xx_data_ready = true;
+    }
+
+    if (afe44xx_data_ready == true)
+    {
+        //Serial.println("xxxxxxx!!!");
+        IRtemp = (unsigned long) (IRtemp << 10);
+        seegtemp = (signed long) (IRtemp);
+        seegtemp = (signed long) (seegtemp >> 10);
+
+        REDtemp = (unsigned long) (REDtemp << 10);
+        seegtemp2 = (signed long) (REDtemp);
+        seegtemp2 = (signed long) (seegtemp2 >> 10);
+
+
+        if (dec == 20)
+        {
+            //Serial.println("xoxoxo!!!");
+            aun_ir_buffer[n_buffer_count] = (uint16_t) (seegtemp >> 4);
+            aun_red_buffer[n_buffer_count] = (uint16_t) (seegtemp2 >> 4);
+            time_stamps[n_buffer_count] = millis();
+            //send data to Thingsboard
+            getAndSendPPG(n_buffer_count, time_stamps[n_buffer_count]);
+            n_buffer_count++;
+            dec = 0;
+
+        }
+        dec++;
+
+        if (n_buffer_count > 99)
+        {
+            // Serial.println("xasdasdx!!!");
+            estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
+            if (n_spo2 == -999){
+                Serial.println("Probe error!!!!");
+                tb.sendTelemetryData("SpO2", n_spo2);
+
+                tb.sendTelemetryData("Pulse rate", n_heart_rate);
+            }
+            else
+            {
+
+                // Serial.print(" Sp02 : ");
+                // Serial.print(n_spo2);
+                // Serial.print("% ,");
+                // Serial.print("Pulse rate :");
+                // Serial.println(n_heart_rate);
+                tb.sendTelemetryData("SpO2", n_spo2);
+
+                tb.sendTelemetryData("Pulse rate", n_heart_rate);
+            }
+            n_buffer_count = 0;
+        }
+        afe44xx_data_ready = false;
+        drdy_trigger = LOW;
+        attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
+        tb.loop();
     }
 }
