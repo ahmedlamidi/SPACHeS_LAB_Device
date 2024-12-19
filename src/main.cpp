@@ -35,6 +35,7 @@
 
 // change path to spiffs and use deep
 // typo in autoconnect , wrongly uses the HTTPCLient instead of HttpClient -> make changes when compiling
+// remove unhandled events in watchdog
 //wifi and device on Thingsboard
 //#define WIFI_AP "NDSU IoT"
 //#define WIFI_PASSWORD "bacondotwager"
