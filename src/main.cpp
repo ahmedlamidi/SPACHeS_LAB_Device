@@ -36,6 +36,7 @@
 // change path to spiffs and use deep
 // typo in autoconnect , wrongly uses the HTTPCLient instead of HttpClient -> make changes when compiling
 // remove unhandled events in watchdog
+// sudo chmod a+rw /dev/ttyUSB0 -> to allow vscode to hx
 //wifi and device on Thingsboard
 //#define WIFI_AP "NDSU IoT"
 //#define WIFI_PASSWORD "bacondotwager"
@@ -353,7 +354,7 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     payload += "}";
     payload += "}";
 
-    Serial.println(payload);
+    // Serial.println(payload);
 
     // Serial.print(time_stamp);
     // Serial.print(",");
@@ -368,10 +369,7 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 
     size_t json_size = measureJson(doc); // Get the size of the JsonDocument
     bool result = tb.sendTelemetryJson(doc, json_size);
-    if (!result){
-        failure_count += 1;
-        Serial.println(failure_count);
-    }
+    Serial.println(result);
 
 
     //save data for PLX-DAQ serial monitor
