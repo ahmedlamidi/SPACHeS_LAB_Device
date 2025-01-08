@@ -32,7 +32,6 @@
 // because we are using MQTT so we need these
 #include <ThingsBoard.h>
 #include <PubSubClient.h>
-#include <Arduino_MQTT_Client.h>
 
 
 
@@ -52,8 +51,8 @@ constexpr uint16_t THINGSBOARD_PORT = 1883U;
 
 WiFiClient espClient; // create a wificlient
 
-Arduino_MQTT_Client mqttClient(espClient); // create arduino mqtt client with the constructor
-ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE); // In version 0.7.0 this means QOS level is set to 1
+WiFiClient wifiClient;
+ThingsBoard tb(wifiClient); // In version 0.7.0 this means QOS level is set to 1
 int status = WL_IDLE_STATUS;
 unsigned long lastSend;
 
@@ -233,303 +232,6 @@ void rootPage(){
     Server.send(200, "text/plain", content); // send the content to the server
 }
 
-void setup()
-{
-    Serial.begin(115200);
-    // Serial.begin(57600);
-    //Serial.begin(9600);
-    //InitWiFi();
-
-
-    //LED and battery read pins
-    pinMode(GRN_LED, OUTPUT);
-    pinMode(RED_LED, OUTPUT);
-    pinMode(BATTERY_IN, INPUT);
-    pinMode(CHARGER,OUTPUT);
-    digitalWrite(RED_LED, HIGH);
-    // Enable saved past credential by autoReconnect option,
-    // even once it is disconnected.
-    Config.apid = "SpO2ap";
-    Config.apip =  IPAddress(192,168,10,101);
-    Config.autoReconnect = false;
-    Config.retainPortal = true;
-    Config.autoRise = true;
-    //Config.preserveAPMode = true;
-    Config.immediateStart = true;
-    Config.hostName = "esp32-01";
-    Portal.config(Config);
-    Server.on("/", rootPage);
-    // Establish a connection with an autoReconnect option.
-
-    if (Portal.begin()) {
-        Serial.println("WiFi connected: " + WiFi.localIP().toString());
-        Serial.println(WiFi.getHostname());
-    }
-    timeClient.begin();
-    timeClient.update();
-    start_epoch_time = timeClient.getEpochTime();
-    start_milli_time = millis();
-
-    //set up for data saving
-    Serial.println("CLEARDATA");
-    Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
-    Serial.println("RESETTIMER");
-    tb.setBufferSize(256);
-
-
-    Serial.println("Intilazition AFE44xx.. ");
-    delay(2000) ;   // pause for a moment
-
-    analogReadResolution(12);
-    //SPI.begin();
-    SPI.begin(14,12,13,15);
-
-    // set the directions
-    pinMode (RESET, OUTPUT); //Slave Select
-    pinMode (PWDN, OUTPUT); //Slave Select
-
-    digitalWrite(RESET, LOW);
-    delay(500);
-    digitalWrite(RESET, HIGH);
-    delay(500);
-    digitalWrite(PWDN, LOW);
-    delay(500);
-    digitalWrite(PWDN, HIGH);
-    delay(500);
-    pinMode (SPISTE, OUTPUT); //Slave Select
-    pinMode (SPIDRDY, INPUT); // data ready
-    //  Serial.println(SPISTE);
-    //  Serial.println(SS);
-    //  Serial.println(digitalRead(SPISTE));
-    //  Serial.println(digitalRead(SCK));
-    //  Serial.println(digitalRead(MOSI));
-
-    attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING); // Digital2 is attached to Data ready pin of AFE is interrupt0 in ARduino
-    //   attachInterrupt(0, afe44xx_drdy_event, RISING );
-    // set SPI transmission
-    SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
-    //SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
-    SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
-    SPI.setBitOrder (MSBFIRST);           //MSB first
-
-    // Packet structure
-    DataPacketHeader[0] = CES_CMDIF_PKT_START_1;  //packet header1 0x0A
-    DataPacketHeader[1] = CES_CMDIF_PKT_START_2;  //packet header2 0xFA
-    DataPacketHeader[2] = datalen;                // data length 9
-    DataPacketHeader[3] = (uint8_t)(datalen >> 8);
-    DataPacketHeader[4] = CES_CMDIF_TYPE_DATA;
-
-    DataPacketFooter[0] = 0x00;
-    DataPacketFooter[1] = CES_CMDIF_PKT_STOP;
-    afe44xxInit ();
-    Serial.println("initialization is done");
-}
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void loop()
-{
-    Portal.handleClient();
-    timeClient.update();
-
-    if (!tb.connected()) {
-        // Connect to the ThingsBoard
-        Serial.print("Connecting to: ");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(" with token ");
-        Serial.println(TOKEN);
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
-            Serial.println("Failed to connect");
-            return;
-        }
-    }
-    //voltage read
-    voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
-    percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
-    if(voltage > 4.19) percentage = 100; //upper limit
-    if(voltage < 3.5) percentage = 0; //Lower limit
-
-    //Charge logic
-    if(voltage > 4.1) digitalWrite(CHARGER, LOW);
-    if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
-
-    if(percentage < 33){
-        battStatus = 0;
-    }else if(percentage < 66){
-        battStatus = 1;
-    }else{
-        battStatus = 2;
-    }
-
-    current_time_LED = millis();                              //get current time for LED function
-    elapsed_time_LED = current_time_LED - previous_time_LED;  //calculate elapsed time for LED function
-    LEDFunction(battStatus);
-
-    // if ( !tb.connected() ) {
-    //   reconnect();
-    // }
-
-    if (drdy_trigger == HIGH)
-    {
-        //Serial.println("111111111xxxxxxx!!!");
-        detachInterrupt(SPIDRDY);
-        afe44xxWrite(CONTROL0, 0x000001);
-        IRtemp = afe44xxRead(LED1VAL);
-        afe44xxWrite(CONTROL0, 0x000001);
-        REDtemp = afe44xxRead(LED2VAL);
-        afe44xx_data_ready = true;
-    }
-
-    if (afe44xx_data_ready == true)
-    {
-        //Serial.println("xxxxxxx!!!");
-        IRtemp = (unsigned long) (IRtemp << 10);
-        seegtemp = (signed long) (IRtemp);
-        seegtemp = (signed long) (seegtemp >> 10);
-
-        REDtemp = (unsigned long) (REDtemp << 10);
-        seegtemp2 = (signed long) (REDtemp);
-        seegtemp2 = (signed long) (seegtemp2 >> 10);
-
-
-        if (dec == 20)
-        {
-            //Serial.println("xoxoxo!!!");
-            aun_ir_buffer[n_buffer_count] = (uint16_t) (seegtemp >> 4);
-            aun_red_buffer[n_buffer_count] = (uint16_t) (seegtemp2 >> 4);
-            time_stamps[n_buffer_count] = millis();
-            //send data to Thingsboard
-            getAndSendPPG(n_buffer_count, time_stamps[n_buffer_count]);
-            n_buffer_count++;
-            dec = 0;
-
-        }
-        dec++;
-
-        if (n_buffer_count > 99)
-        {
-            // Serial.println("xasdasdx!!!");
-            estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
-            if (n_spo2 == -999){
-                Serial.println("Probe error!!!!");
-                tb.sendTelemetryData("SpO2", n_spo2);
-
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            }
-            else
-            {
-
-                // Serial.print(" Sp02 : ");
-                // Serial.print(n_spo2);
-                // Serial.print("% ,");
-                // Serial.print("Pulse rate :");
-                // Serial.println(n_heart_rate);
-                tb.sendTelemetryData("SpO2", n_spo2);
-
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            }
-            n_buffer_count = 0;
-        }
-        afe44xx_data_ready = false;
-        drdy_trigger = LOW;
-        attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
-        tb.loop();
-    }
-}
-void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
-{
-    // Prepare a JSON payload string
-    time_stamp = ((start_epoch_time * 1000) + (real_time - start_milli_time));
-    char PPG_data[1500];
-
-    String payload = "{";
-    payload += "\"ts\": "; payload += time_stamp; payload += ",";
-    payload += "\"values\": ";
-    payload += "{";
-    payload += "\"PPG_IR\": "; payload += aun_ir_buffer[n_buffer_count]; payload += ",";
-    payload += "\"PPG_R\":"; payload += aun_red_buffer[n_buffer_count];
-    payload += "}";
-    payload += "}";
-
-    Serial.println(payload);
-
-    // Serial.print(time_stamp);
-    // Serial.print(",");
-    // Serial.print(aun_ir_buffer[n_buffer_count]);
-    // Serial.print(",");
-    // Serial.println(aun_red_buffer[n_buffer_count]);
-    // payload.toCharArray(PPG_data, 1500);
-    // tb.sendTelemetryJson(PPG_data);
-
-    DynamicJsonDocument doc(1500); // Define the JsonDocument size
-    deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
-
-    size_t json_size = measureJson(doc); // Get the size of the JsonDocument
-    bool result = tb.sendTelemetryJson(doc, json_size);
-    if (!result){
-        failure_count += 1;
-        Serial.println(failure_count);
-    }
-
-
-    //save data for PLX-DAQ serial monitor
-    //Serial.print("DATA,DATE,TIME,");
-    //Serial.print(ts);
-    //Serial.print(",");
-    //Serial.print(aun_ir_buffer[n_buffer_count]);
-    //Serial.print(",");
-    //Serial.print(aun_red_buffer[n_buffer_count]);
-    //Serial.println(",");
-}
-
-
-//void InitWiFi()
-//{
-//  Serial.println("Connecting to AP ...");
-// attempt to connect to WiFi network
-
-//WiFi.begin(WIFI_AP, WIFI_PASSWORD);
-//while (WiFi.status() != WL_CONNECTED) {
-//delay(500);
-//    Serial.print(".");
-// }
-//  Serial.println("Connected to AP");
-//}
-
-
-void reconnect() {
-    // Loop until we're reconnected
-    while (!tb.connected()) {
-        status = WiFi.status();
-        //if ( status != WL_CONNECTED) {
-        //WiFi.begin(WIFI_AP, WIFI_PASSWORD);
-        //while (WiFi.status() != WL_CONNECTED) {
-        //delay(500);
-//        Serial.print(".");
-        //}
-        //Serial.println("Connected to AP");
-        //}
-        Serial.print(status);
-        Serial.print("Connecting to ThingsBoard node ...");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(TOKEN);
-        if ( tb.connect(THINGSBOARD_SERVER, TOKEN) ) {
-            Serial.println( "[DONE]" );
-        }
-        else {
-            Serial.print( "[FAILED]" );
-            // Serial.println(tb.getError());
-            Serial.println( " : retrying in 5 seconds]" );
-            // Wait 5 seconds before retrying
-            delay( 5000 );
-        }
-    }
-}
-///////// Gets Fired on DRDY event/////////////////////////////
-ICACHE_RAM_ATTR void afe44xx_drdy_event()
-{
-    drdy_trigger = HIGH;
-}
-
 ////////////////AFE44xx initialization//////////////////////////////////////////
 void afe44xxInit (void)
 {
@@ -609,6 +311,274 @@ unsigned long afe44xxRead (uint8_t address)
     return data; // return with 24 bits of read data
 }
 
+ICACHE_RAM_ATTR void afe44xx_drdy_event()
+{
+    drdy_trigger = HIGH;
+}
+
+double ReadVoltage(uint8_t pin){
+    double reading = analogRead(pin); // Reference voltage is 3v3 so maximum reading is 3v3 = 4095 in range 0 to 4095
+    if(reading < 1 || reading > 4095) return 0;
+    //return (-0.000000000000016 * pow(reading,4) + 0.000000000118171 * pow(reading,3)- 0.000000301211691 * pow(reading,2)+ 0.001109019271794 * reading + 0.034143524634089)*2; //original fir from creator
+    return (-.0000000000000096795072211912461* pow(reading,4) + .000000000064564581092594387 * pow(reading,3) - .00000014328287130333392 * pow(reading,2)+ .00090565621090209041 * reading + .11253959753849530)*2;
+}
+
+void LEDFunction (int battStatus){
+    switch(battStatus){
+        case 0: //Battery criticially low (less than 33%)
+        {
+            if(elapsed_time_LED > 1000){
+                // if the LED is off turn it on and vice-versa:
+                ledState = (ledState == LOW) ? HIGH : LOW;
+
+                // set the LED with the ledState of the variable:
+                digitalWrite(GRN_LED, LOW);
+                digitalWrite(RED_LED, ledState);
+                previous_time_LED = millis();
+            }
+            break;
+        }
+        case 1: //Battery < 66%
+        {
+            if(elapsed_time_LED > 1000){
+                // if the LED is off turn it on and vice-versa:
+                ledState = (ledState == LOW) ? HIGH : LOW;
+
+                // set the LED with the ledState of the variable:
+                digitalWrite(GRN_LED, ledState);
+                digitalWrite(RED_LED, ledState);
+                previous_time_LED = millis();
+            }
+            break;
+        }
+        case 2: //Battery > 66%
+        {
+            if(elapsed_time_LED > 2000){
+                // if the LED is off turn it on and vice-versa:
+                ledState = (ledState == LOW) ? HIGH : LOW;
+
+                // set the LED with the ledState of the variable:
+                digitalWrite(GRN_LED, ledState);
+                digitalWrite(RED_LED, LOW);
+                previous_time_LED = millis();
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void find_peak_above( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height )
+/**
+  \brief        Find peaks above n_min_height
+  \par          Details
+                Find all peaks above MIN_HEIGHT
+
+  \retval       None
+*/
+{
+    int32_t i = 1, n_width;
+    *n_npks = 0;
+
+    while (i < n_size - 1) {
+        if (pn_x[i] > n_min_height && pn_x[i] > pn_x[i - 1]) {   // find left edge of potential peaks
+            n_width = 1;
+            while (i + n_width < n_size && pn_x[i] == pn_x[i + n_width]) // find flat peaks
+                n_width++;
+            if (pn_x[i] > pn_x[i + n_width] && (*n_npks) < 15 ) {   // find right edge of peaks
+                pn_locs[(*n_npks)++] = i;
+                // for flat peaks, peak location is left edge
+                i += n_width + 1;
+            }
+            else
+                i += n_width;
+        }
+        else
+            i++;
+        //  Serial.println("beat");
+    }
+}
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void sort_ascend(int32_t  *pn_x, int32_t n_size)
+/**
+  \brief        Sort array
+  \par          Details
+                Sort array in ascending order (insertion sort algorithm)
+
+  \retval       None
+*/
+{
+    int32_t i, j, n_temp;
+    for (i = 1; i < n_size; i++) {
+        n_temp = pn_x[i];
+        for (j = i; j > 0 && n_temp < pn_x[j - 1]; j--)
+            pn_x[j] = pn_x[j - 1];
+        pn_x[j] = n_temp;
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void sort_indices_descend(  int32_t  *pn_x, int32_t *pn_indx, int32_t n_size)
+/**
+  \brief        Sort indices
+  \par          Details
+                Sort indices according to descending order (insertion sort algorithm)
+
+  \retval       None
+*/
+{
+    int32_t i, j, n_temp;
+    for (i = 1; i < n_size; i++) {
+        n_temp = pn_indx[i];
+        for (j = i; j > 0 && pn_x[n_temp] > pn_x[pn_indx[j - 1]]; j--)
+            pn_indx[j] = pn_indx[j - 1];
+        pn_indx[j] = n_temp;
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void remove_close_peaks(int32_t *pn_locs, int32_t *pn_npks, int32_t *pn_x, int32_t n_min_distance)
+/**
+  \brief        Remove peaks
+  \par          Details
+                Remove peaks separated by less than MIN_DISTANCE
+
+  \retval       None
+*/
+{
+
+    int32_t i, j, n_old_npks, n_dist;
+
+    /* Order peaks from large to small */
+    sort_indices_descend( pn_x, pn_locs, *pn_npks );
+
+    for ( i = -1; i < *pn_npks; i++ ) {
+        n_old_npks = *pn_npks;
+        *pn_npks = i + 1;
+        for ( j = i + 1; j < n_old_npks; j++ ) {
+            n_dist =  pn_locs[j] - ( i == -1 ? -1 : pn_locs[i] ); // lag-zero peak of autocorr is at index -1
+            if ( n_dist > n_min_distance || n_dist < -n_min_distance )
+                pn_locs[(*pn_npks)++] = pn_locs[j];
+        }
+    }
+
+    // Resort indices int32_to ascending order
+    sort_ascend( pn_locs, *pn_npks );
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height, int32_t n_min_distance, int32_t n_max_num )
+/**
+  \brief        Find peaks
+  \par          Details
+                Find at most MAX_NUM peaks above MIN_HEIGHT separated by at least MIN_DISTANCE
+
+  \retval       None
+*/
+{
+    find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
+    remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
+    *n_npks = min( *n_npks, n_max_num );
+}
+
+
+void setup()
+{
+    Serial.begin(115200);
+    // Serial.begin(57600);
+    //Serial.begin(9600);
+    //InitWiFi();
+
+
+    //LED and battery read pins
+    pinMode(GRN_LED, OUTPUT);
+    pinMode(RED_LED, OUTPUT);
+    pinMode(BATTERY_IN, INPUT);
+    pinMode(CHARGER,OUTPUT);
+    digitalWrite(RED_LED, HIGH);
+    // Enable saved past credential by autoReconnect option,
+    // even once it is disconnected.
+    Config.apid = "SpO2ap";
+    Config.apip =  IPAddress(192,168,10,101);
+    Config.autoReconnect = false;
+    Config.retainPortal = true;
+    Config.autoRise = true;
+    //Config.preserveAPMode = true;
+    Config.immediateStart = true;
+    Config.hostName = "esp32-01";
+    Portal.config(Config);
+    Server.on("/", rootPage);
+    // Establish a connection with an autoReconnect option.
+
+    if (Portal.begin()) {
+        Serial.println("WiFi connected: " + WiFi.localIP().toString());
+        Serial.println(WiFi.getHostname());
+    }
+    timeClient.begin();
+    timeClient.update();
+    start_epoch_time = timeClient.getEpochTime();
+    start_milli_time = millis();
+
+    //set up for data saving
+    Serial.println("CLEARDATA");
+    Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
+    Serial.println("RESETTIMER");
+
+
+    Serial.println("Intilazition AFE44xx.. ");
+    delay(2000) ;   // pause for a moment
+
+    analogReadResolution(12);
+    //SPI.begin();
+    SPI.begin(14,12,13,15);
+
+    // set the directions
+    pinMode (RESET, OUTPUT); //Slave Select
+    pinMode (PWDN, OUTPUT); //Slave Select
+
+    digitalWrite(RESET, LOW);
+    delay(500);
+    digitalWrite(RESET, HIGH);
+    delay(500);
+    digitalWrite(PWDN, LOW);
+    delay(500);
+    digitalWrite(PWDN, HIGH);
+    delay(500);
+    pinMode (SPISTE, OUTPUT); //Slave Select
+    pinMode (SPIDRDY, INPUT); // data ready
+    //  Serial.println(SPISTE);
+    //  Serial.println(SS);
+    //  Serial.println(digitalRead(SPISTE));
+    //  Serial.println(digitalRead(SCK));
+    //  Serial.println(digitalRead(MOSI));
+
+    attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING); // Digital2 is attached to Data ready pin of AFE is interrupt0 in ARduino
+    //   attachInterrupt(0, afe44xx_drdy_event, RISING );
+    // set SPI transmission
+    SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
+    //SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
+    SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
+    SPI.setBitOrder (MSBFIRST);           //MSB first
+
+    // Packet structure
+    DataPacketHeader[0] = CES_CMDIF_PKT_START_1;  //packet header1 0x0A
+    DataPacketHeader[1] = CES_CMDIF_PKT_START_2;  //packet header2 0xFA
+    DataPacketHeader[2] = datalen;                // data length 9
+    DataPacketHeader[3] = (uint8_t)(datalen >> 8);
+    DataPacketHeader[4] = CES_CMDIF_TYPE_DATA;
+
+    DataPacketFooter[0] = 0x00;
+    DataPacketFooter[1] = CES_CMDIF_PKT_STOP;
+    afe44xxInit ();
+    Serial.println("initialization is done");
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t *pun_red_buffer, int32_t *pn_spo2, int8_t *pch_spo2_valid, int32_t *pn_heart_rate, int8_t *pch_hr_valid , unsigned long *ts_arr)
 {
@@ -736,171 +706,203 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
     }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height, int32_t n_min_distance, int32_t n_max_num )
-/**
-  \brief        Find peaks
-  \par          Details
-                Find at most MAX_NUM peaks above MIN_HEIGHT separated by at least MIN_DISTANCE
-
-  \retval       None
-*/
+void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 {
-    find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
-    remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
-    *n_npks = min( *n_npks, n_max_num );
+    // Prepare a JSON payload string
+    time_stamp = ((start_epoch_time * 1000) + (real_time - start_milli_time));
+    char PPG_data[1500];
+
+    String payload = "{";
+    payload += "\"ts\": "; payload += time_stamp; payload += ",";
+    payload += "\"values\": ";
+    payload += "{";
+    payload += "\"PPG_IR\": "; payload += aun_ir_buffer[n_buffer_count]; payload += ",";
+    payload += "\"PPG_R\":"; payload += aun_red_buffer[n_buffer_count];
+    payload += "}";
+    payload += "}";
+
+    Serial.println(payload);
+
+    // Serial.print(time_stamp);
+    // Serial.print(",");
+    // Serial.print(aun_ir_buffer[n_buffer_count]);
+    // Serial.print(",");
+    // Serial.println(aun_red_buffer[n_buffer_count]);
+    // payload.toCharArray(PPG_data, 1500);
+    // tb.sendTelemetryJson(PPG_data);
+
+    DynamicJsonDocument doc(1500); // Define the JsonDocument size
+    deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
+
+    size_t json_size = measureJson(doc); // Get the size of the JsonDocument
+    bool result = tb.sendTelemetryJson(doc, json_size);
+    if (!result){
+        failure_count += 1;
+        Serial.println(failure_count);
+    }
+
+
+    //save data for PLX-DAQ serial monitor
+    //Serial.print("DATA,DATE,TIME,");
+    //Serial.print(ts);
+    //Serial.print(",");
+    //Serial.print(aun_ir_buffer[n_buffer_count]);
+    //Serial.print(",");
+    //Serial.print(aun_red_buffer[n_buffer_count]);
+    //Serial.println(",");
 }
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void find_peak_above( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height )
-/**
-  \brief        Find peaks above n_min_height
-  \par          Details
-                Find all peaks above MIN_HEIGHT
 
-  \retval       None
-*/
+void loop()
 {
-    int32_t i = 1, n_width;
-    *n_npks = 0;
+    Portal.handleClient();
+    timeClient.update();
 
-    while (i < n_size - 1) {
-        if (pn_x[i] > n_min_height && pn_x[i] > pn_x[i - 1]) {   // find left edge of potential peaks
-            n_width = 1;
-            while (i + n_width < n_size && pn_x[i] == pn_x[i + n_width]) // find flat peaks
-                n_width++;
-            if (pn_x[i] > pn_x[i + n_width] && (*n_npks) < 15 ) {   // find right edge of peaks
-                pn_locs[(*n_npks)++] = i;
-                // for flat peaks, peak location is left edge
-                i += n_width + 1;
+    if (!tb.connected()) {
+        // Connect to the ThingsBoard
+        Serial.print("Connecting to: ");
+        Serial.print(THINGSBOARD_SERVER);
+        Serial.print(" with token ");
+        Serial.println(TOKEN);
+        if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
+            Serial.println("Failed to connect");
+            return;
+        }
+    }
+    //voltage read
+    voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
+    percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
+    if(voltage > 4.19) percentage = 100; //upper limit
+    if(voltage < 3.5) percentage = 0; //Lower limit
+
+    //Charge logic
+    if(voltage > 4.1) digitalWrite(CHARGER, LOW);
+    if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
+
+    if(percentage < 33){
+        battStatus = 0;
+    }else if(percentage < 66){
+        battStatus = 1;
+    }else{
+        battStatus = 2;
+    }
+
+    current_time_LED = millis();                              //get current time for LED function
+    elapsed_time_LED = current_time_LED - previous_time_LED;  //calculate elapsed time for LED function
+    LEDFunction(battStatus);
+
+    // if ( !tb.connected() ) {
+    //   reconnect();
+    // }
+
+    if (drdy_trigger == HIGH)
+    {
+        //Serial.println("111111111xxxxxxx!!!");
+        detachInterrupt(SPIDRDY);
+        afe44xxWrite(CONTROL0, 0x000001);
+        IRtemp = afe44xxRead(LED1VAL);
+        afe44xxWrite(CONTROL0, 0x000001);
+        REDtemp = afe44xxRead(LED2VAL);
+        afe44xx_data_ready = true;
+    }
+
+    if (afe44xx_data_ready == true)
+    {
+        //Serial.println("xxxxxxx!!!");
+        IRtemp = (unsigned long) (IRtemp << 10);
+        seegtemp = (signed long) (IRtemp);
+        seegtemp = (signed long) (seegtemp >> 10);
+
+        REDtemp = (unsigned long) (REDtemp << 10);
+        seegtemp2 = (signed long) (REDtemp);
+        seegtemp2 = (signed long) (seegtemp2 >> 10);
+
+
+        if (dec == 20)
+        {
+            //Serial.println("xoxoxo!!!");
+            aun_ir_buffer[n_buffer_count] = (uint16_t) (seegtemp >> 4);
+            aun_red_buffer[n_buffer_count] = (uint16_t) (seegtemp2 >> 4);
+            time_stamps[n_buffer_count] = millis();
+            //send data to Thingsboard
+            getAndSendPPG(n_buffer_count, time_stamps[n_buffer_count]);
+            n_buffer_count++;
+            dec = 0;
+
+        }
+        dec++;
+
+        if (n_buffer_count > 99)
+        {
+            // Serial.println("xasdasdx!!!");
+            estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
+            if (n_spo2 == -999){
+                Serial.println("Probe error!!!!");
+                tb.sendTelemetryData("SpO2", n_spo2);
+
+                tb.sendTelemetryData("Pulse rate", n_heart_rate);
             }
             else
-                i += n_width;
-        }
-        else
-            i++;
-        //  Serial.println("beat");
-    }
-}
+            {
 
+                // Serial.print(" Sp02 : ");
+                // Serial.print(n_spo2);
+                // Serial.print("% ,");
+                // Serial.print("Pulse rate :");
+                // Serial.println(n_heart_rate);
+                tb.sendTelemetryData("SpO2", n_spo2);
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void remove_close_peaks(int32_t *pn_locs, int32_t *pn_npks, int32_t *pn_x, int32_t n_min_distance)
-/**
-  \brief        Remove peaks
-  \par          Details
-                Remove peaks separated by less than MIN_DISTANCE
-
-  \retval       None
-*/
-{
-
-    int32_t i, j, n_old_npks, n_dist;
-
-    /* Order peaks from large to small */
-    sort_indices_descend( pn_x, pn_locs, *pn_npks );
-
-    for ( i = -1; i < *pn_npks; i++ ) {
-        n_old_npks = *pn_npks;
-        *pn_npks = i + 1;
-        for ( j = i + 1; j < n_old_npks; j++ ) {
-            n_dist =  pn_locs[j] - ( i == -1 ? -1 : pn_locs[i] ); // lag-zero peak of autocorr is at index -1
-            if ( n_dist > n_min_distance || n_dist < -n_min_distance )
-                pn_locs[(*pn_npks)++] = pn_locs[j];
-        }
-    }
-
-    // Resort indices int32_to ascending order
-    sort_ascend( pn_locs, *pn_npks );
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void sort_ascend(int32_t  *pn_x, int32_t n_size)
-/**
-  \brief        Sort array
-  \par          Details
-                Sort array in ascending order (insertion sort algorithm)
-
-  \retval       None
-*/
-{
-    int32_t i, j, n_temp;
-    for (i = 1; i < n_size; i++) {
-        n_temp = pn_x[i];
-        for (j = i; j > 0 && n_temp < pn_x[j - 1]; j--)
-            pn_x[j] = pn_x[j - 1];
-        pn_x[j] = n_temp;
-    }
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void sort_indices_descend(  int32_t  *pn_x, int32_t *pn_indx, int32_t n_size)
-/**
-  \brief        Sort indices
-  \par          Details
-                Sort indices according to descending order (insertion sort algorithm)
-
-  \retval       None
-*/
-{
-    int32_t i, j, n_temp;
-    for (i = 1; i < n_size; i++) {
-        n_temp = pn_indx[i];
-        for (j = i; j > 0 && pn_x[n_temp] > pn_x[pn_indx[j - 1]]; j--)
-            pn_indx[j] = pn_indx[j - 1];
-        pn_indx[j] = n_temp;
-    }
-}
-double ReadVoltage(uint8_t pin){
-    double reading = analogRead(pin); // Reference voltage is 3v3 so maximum reading is 3v3 = 4095 in range 0 to 4095
-    if(reading < 1 || reading > 4095) return 0;
-    //return (-0.000000000000016 * pow(reading,4) + 0.000000000118171 * pow(reading,3)- 0.000000301211691 * pow(reading,2)+ 0.001109019271794 * reading + 0.034143524634089)*2; //original fir from creator
-    return (-.0000000000000096795072211912461* pow(reading,4) + .000000000064564581092594387 * pow(reading,3) - .00000014328287130333392 * pow(reading,2)+ .00090565621090209041 * reading + .11253959753849530)*2;
-}
-
-void LEDFunction (int battStatus){
-    switch(battStatus){
-        case 0: //Battery criticially low (less than 33%)
-        {
-            if(elapsed_time_LED > 1000){
-                // if the LED is off turn it on and vice-versa:
-                ledState = (ledState == LOW) ? HIGH : LOW;
-
-                // set the LED with the ledState of the variable:
-                digitalWrite(GRN_LED, LOW);
-                digitalWrite(RED_LED, ledState);
-                previous_time_LED = millis();
+                tb.sendTelemetryData("Pulse rate", n_heart_rate);
             }
-            break;
+            n_buffer_count = 0;
         }
-        case 1: //Battery < 66%
-        {
-            if(elapsed_time_LED > 1000){
-                // if the LED is off turn it on and vice-versa:
-                ledState = (ledState == LOW) ? HIGH : LOW;
-
-                // set the LED with the ledState of the variable:
-                digitalWrite(GRN_LED, ledState);
-                digitalWrite(RED_LED, ledState);
-                previous_time_LED = millis();
-            }
-            break;
-        }
-        case 2: //Battery > 66%
-        {
-            if(elapsed_time_LED > 2000){
-                // if the LED is off turn it on and vice-versa:
-                ledState = (ledState == LOW) ? HIGH : LOW;
-
-                // set the LED with the ledState of the variable:
-                digitalWrite(GRN_LED, ledState);
-                digitalWrite(RED_LED, LOW);
-                previous_time_LED = millis();
-            }
-            break;
-        }
-        default:
-            break;
+        afe44xx_data_ready = false;
+        drdy_trigger = LOW;
+        attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
+        tb.loop();
     }
 }
+//void InitWiFi()
+//{
+//  Serial.println("Connecting to AP ...");
+// attempt to connect to WiFi network
+
+//WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+//while (WiFi.status() != WL_CONNECTED) {
+//delay(500);
+//    Serial.print(".");
+// }
+//  Serial.println("Connected to AP");
+//}
+
+
+void reconnect() {
+    // Loop until we're reconnected
+    while (!tb.connected()) {
+        status = WiFi.status();
+        //if ( status != WL_CONNECTED) {
+        //WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+        //while (WiFi.status() != WL_CONNECTED) {
+        //delay(500);
+//        Serial.print(".");
+        //}
+        //Serial.println("Connected to AP");
+        //}
+        Serial.print(status);
+        Serial.print("Connecting to ThingsBoard node ...");
+        Serial.print(THINGSBOARD_SERVER);
+        Serial.print(TOKEN);
+        if ( tb.connect(THINGSBOARD_SERVER, TOKEN) ) {
+            Serial.println( "[DONE]" );
+        }
+        else {
+            Serial.print( "[FAILED]" );
+            // Serial.println(tb.getError());
+            Serial.println( " : retrying in 5 seconds]" );
+            // Wait 5 seconds before retrying
+            delay( 5000 );
+        }
+    }
+}
+///////// Gets Fired on DRDY event/////////////////////////////
