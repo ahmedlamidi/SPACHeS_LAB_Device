@@ -380,6 +380,11 @@ void find_peak_above( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_
   \retval       None
 */
 {
+    // the first variable is to save the location of the peaks -> index is used
+    // the scond variable is the number of peaks found
+    // third variable is the actual array to check
+    // the fourth array is buffer size
+    // fifth is the minimum height needed 
     int32_t i = 1, n_width;
     *n_npks = 0;
 
@@ -433,6 +438,10 @@ void sort_indices_descend(  int32_t  *pn_x, int32_t *pn_indx, int32_t n_size)
   \retval       None
 */
 {
+    // so we use the actual array
+    // the location of the peaks
+    // the actual number of peaks
+    // sorting 
     int32_t i, j, n_temp;
     for (i = 1; i < n_size; i++) {
         n_temp = pn_indx[i];
@@ -440,6 +449,7 @@ void sort_indices_descend(  int32_t  *pn_x, int32_t *pn_indx, int32_t n_size)
             pn_indx[j] = pn_indx[j - 1];
         pn_indx[j] = n_temp;
     }
+    // we want the indices sorted by the descending height of the peaks
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -452,11 +462,18 @@ void remove_close_peaks(int32_t *pn_locs, int32_t *pn_npks, int32_t *pn_x, int32
   \retval       None
 */
 {
+     // the first variable is the lcoation of the peaks
+    // the second is the number of peaks found
+    // the third is the actual array
+    // the fourth is the minimum distance between them
 
     int32_t i, j, n_old_npks, n_dist;
 
-    /* Order peaks from large to small */
+    /* Order peaks from large to small */ // we want the indices sorted by the descending height of the peaks
     sort_indices_descend( pn_x, pn_locs, *pn_npks );
+    // so we use the actual array
+    // the location of the peaks
+    // the actual number of peaks
 
     for ( i = -1; i < *pn_npks; i++ ) {
         n_old_npks = *pn_npks;
@@ -482,8 +499,26 @@ void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_si
   \retval       None
 */
 {
+    // first variable is to save the valleys
+    // the second variable is to keep the number of peaks
+    // the third variable is the actual array
+    // the fouth variable is size of the buffer
+    // fifth variable is minimum height of peak
+    // then minimum distance of peaks
+    // then the maximum number of peaks
     find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
+    // the first variable is to save the peaks - index location
+    // the second variable is the number of peaks found
+    // third variable is the actual array to check
+    // the fourth array is buffer size
+    // fifth is the minimum height needed
+
     remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
+    // the first variable is the lcoation of the peaks
+    // the second is the number of peaks found
+    // the third is the actual array
+    // the fourth is the minimum distance between them
+
     *n_npks = min( *n_npks, n_max_num );
 }
 
@@ -621,6 +656,13 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
     for ( k = 0 ; k < 15; k++) an_ir_valley_locs[k] = 0;
     // since we flipped signal, we use peak detector as valley detector
     find_peak( an_ir_valley_locs, &n_npks, an_x, BUFFER_SIZE, n_th1, 4, 15 );//peak_height, peak_distance, max_num_peaks
+    // first variable is to save the valleys
+    // the second variable is to keep the number of peaks
+    // the third variable is the actual array
+    // the fouth variable is size of the buffer
+    // fifth variable is minimum height of peak
+    // then minimum distance of peaks
+    // then the maximum number of peaks
     n_peak_interval_sum = 0;
     if (n_npks >= 2) {
         for (k = 1; k < n_npks; k++) n_peak_interval_sum += (ts_arr[an_ir_valley_locs[k]] - ts_arr[an_ir_valley_locs[k - 1]]) ;
