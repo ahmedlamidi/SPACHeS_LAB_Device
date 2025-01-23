@@ -22,10 +22,9 @@ def estimate_spo2(ir_data, ir_length, r_data, ts_arr):
     minimum_peak_height = min(minimum_peak_height, 60)
     minimum_peak_height = max(minimum_peak_height, 30)
 
-    # create an array to keep the value of the valleys
-    valley_indexes = []
 
     #call find peaks and store result in valley_indexes
+    valley_indexes = find_peak([], 0, ac_ir_data, len(ac_ir_data), minimum_peak_height, 4, 15)
 
     # calculating actual heartbeat now
     peak_interval_sum = 0
@@ -43,13 +42,15 @@ def estimate_spo2(ir_data, ir_length, r_data, ts_arr):
 
 
 
-def find_peak(valley_locations, count_peaks, ac_component_array, size_array, peak_min_height, peak_min_distance, max_peak_count):
+def find_peak(valley_locations, count_peaks, ac_component_array, array_len, min_peak_height, min_ind_dist_peaks, max_peak_count):
     # call find peak above
     # then call remove close peaks also
-    pass
+    valley_locations = find_peak_above([], 0,ac_component_array, len(ac_component_array), min_peak_height)
+    valley_locations = remove_close_peaks(valley_locations, len(valley_locations), ac_component_array, min_ind_dist_peaks)
+    return valley_locations
 
 
-def find_peak_above(peak_locations, count_peaks, data_array,size_array,min_height_peaks):
+def find_peak_above(peak_locations, count_peaks, data_array,array_len ,min_height_peaks):
     current_ind = 1
     width = 0
     while current_ind < len(data_array):
@@ -70,15 +71,16 @@ def find_peak_above(peak_locations, count_peaks, data_array,size_array,min_heigh
                 current_ind += width
         else:
             current_ind += 1
+    return peak_locations
 
         # what do we need to return to make this work in python 
 
 
 
-def remove_close_peaks(location_peaks, number_peaks, data_array, min_distance_peaks):
+def remove_close_peaks(peakLocations, number_peaks, data_array, min_ind_dist_peaks):
     # so first we make the locations sorted based on the size of the peaks they contain
-    sort_indices_descend(data_array, location_peaks, len(location_peaks))
 
+    # ---------- Old Thinking -----------
     # starting i at -1 we go all the way to to the number of peaks we have
     # old number of peaks is then the index + 1
     # essentially starting from the start of the array and putting the peaks back in
@@ -91,19 +93,34 @@ def remove_close_peaks(location_peaks, number_peaks, data_array, min_distance_pe
     # and then does this over the whole array
     # it also keeps them all the first iteration over
     # no idea why it does this though
-    
-    # optimize here
-    new_peaks = []
-    past_peak = data_array[location_peaks[0]]
-    current_ind = 1
-    while current_ind < len(location_peaks):
-        if abs(data_array[location_peaks[current_ind]] - past_peak) > min_distance_peaks:
-            past_peak = data_array[location_peaks[current_ind]]
-            new_peaks.append(location_peaks[current_ind])
-        current_ind += 1
 
-    # same functionality but easier to understand I hope
-    return new_peaks
+    #-----------New Thinking ---------
+    # we sort the indices by height from large to small
+    # so sort ascending is correct right now
+    # Then starting from the biggest index we only add it to array
+        # on the condition the next one is atleast n - min - distance away
+        # or if it is the starting element in the list
+        # it incorrectly adds just one - we need to add (min_distance + 1) 
+
+
+    # ------ Conclusion -----
+    # I was wrong in my initial thinking and it basically slowly removes the peaks that are too close
+    # still need to change the part of the code with the I
+
+
+    sort_indices_descend(data_array, peakLocations, len(peakLocations))
+    index = 0
+    while index < len(peakLocations):
+        temp_array = peakLocations[:index + 1] # keep what is on the left side
+        for innerIndex in range(index + 1, len(peakLocations)):
+            if abs(peakLocations[innerIndex] - peakLocations[index]) > min_ind_dist_peaks:
+                temp_array.append(peakLocations[innerIndex])
+        peakLocations = temp_array
+
+    peakLocations.sort()
+
+    
+    return peakLocations
 
 
 def sort_indices_descend(data_array, location_peaks, number_peaks):
