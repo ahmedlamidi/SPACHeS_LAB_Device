@@ -35,7 +35,8 @@
 
 // change path to spiffs and use deep
 // typo in autoconnect , wrongly uses the HTTPCLient instead of HttpClient -> make changes when compiling
-// remove unhandled events in watchdog
+// Make changes in HTTPUpdate.h
+// callbackwatchdog.h - Delete skip handled events == False
 // sudo chmod a+rw /dev/ttyUSB0 -> to allow vscode to hx
 //wifi and device on Thingsboard
 //#define WIFI_AP "NDSU IoT"
@@ -396,6 +397,18 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 //  Serial.println("Connected to AP");
 //}
 
+void printArray(int32_t  *arr, char *name, int32_t size_n) {
+    Serial.print(name);
+    Serial.print( " = [");
+    for (size_t i = 0; i < size_n; ++i) {
+        Serial.print(arr[i]);
+        if (i < size_n - 1) {
+            Serial.print(", ");
+        }
+    }
+    Serial.println( "]");
+}
+
 
 void reconnect() {
     // Loop until we're reconnected
@@ -612,8 +625,11 @@ void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_si
   \retval       None
 */
 {
+    printArray(pn_x, "Data Values", n_size);
     find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
+    printArray(pn_locs, "Peaks Above", *n_npks);
     remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
+    printArray(pn_locs, "Peaks Remove Close", *n_npks);
     *n_npks = min( *n_npks, n_max_num );
 }
 

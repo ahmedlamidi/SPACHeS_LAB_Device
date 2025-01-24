@@ -98,7 +98,7 @@ def remove_close_peaks(peakLocations, number_peaks, data_array, min_ind_dist_pea
     # we sort the indices by height from large to small
     # so sort ascending is correct right now
     # Then starting from the biggest index we only add it to array
-        # on the condition the next one is atleast n - min - distance away
+        # on the condition the next one is atleast n - min_distance away
         # or if it is the starting element in the list
         # it incorrectly adds just one - we need to add (min_distance + 1) 
 
