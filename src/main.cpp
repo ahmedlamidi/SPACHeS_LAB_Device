@@ -44,6 +44,16 @@
 // #define TOKEN "spo2_mark"
 // char thingsboardServer[] = "http://131.247.15.226";
 
+enum Mode{
+    BLUETOOTH,
+    WIFI,
+    OFFLINE
+};
+Mode CURRENT_MODE = WIFI;
+
+int DEBUG = 0;
+
+
 constexpr char TOKEN[] = "spo2_123";
 constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
 // Thingsboard we want to establish a connection too
@@ -259,32 +269,39 @@ void setup()
     digitalWrite(RED_LED, HIGH);
     // Enable saved past credential by autoReconnect option,
     // even once it is disconnected.
-    Config.apid = "SpO2ap";
-    Config.apip =  IPAddress(192,168,10,101);
-    Config.autoReconnect = false;
-    Config.retainPortal = true;
-    Config.autoRise = true;
-    //Config.preserveAPMode = true;
-    Config.immediateStart = true;
-    Config.hostName = "esp32-01";
-    Portal.config(Config);
-    Server.on("/", rootPage);
-    // Establish a connection with an autoReconnect option.
-
-    if (Portal.begin()) {
-        Serial.println("WiFi connected: " + WiFi.localIP().toString());
-        Serial.println(WiFi.getHostname());
+    if (CURRENT_MODE == WIFI){
+        Config.apid = "SpO2ap";
+        Config.apip =  IPAddress(192,168,10,101);
+        Config.autoReconnect = false;
+        Config.retainPortal = true;
+        Config.autoRise = true;
+        //Config.preserveAPMode = true;
+        Config.immediateStart = true;
+        Config.hostName = "esp32-01";
+        Portal.config(Config);
+        Server.on("/", rootPage);
+        // Establish a connection with an autoReconnect option.
+        if (Portal.begin()) {
+            Serial.println("WiFi connected: " + WiFi.localIP().toString());
+            Serial.println(WiFi.getHostname());
+        }
+        timeClient.begin();
+        timeClient.update();
+        start_epoch_time = timeClient.getEpochTime();
+        tb.setBufferSize(256);
     }
-    timeClient.begin();
-    timeClient.update();
-    start_epoch_time = timeClient.getEpochTime();
+    else{
+        struct timeval tp;
+        gettimeofday(&tp, NULL);
+        start_epoch_time = tp.tv_sec;
+    }
     start_milli_time = millis();
 
     //set up for data saving
     Serial.println("CLEARDATA");
     Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
     Serial.println("RESETTIMER");
-    tb.setBufferSize(256);
+
 
 
     Serial.println("Intilazition AFE44xx.. ");
@@ -365,13 +382,15 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     // payload.toCharArray(PPG_data, 1500);
     // tb.sendTelemetryJson(PPG_data);
 
+    if (CURRENT_MODE == WIFI){
     DynamicJsonDocument doc(1500); // Define the JsonDocument size
     deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
-
     size_t json_size = measureJson(doc); // Get the size of the JsonDocument
     bool result = tb.sendTelemetryJson(doc, json_size);
-    Serial.println(result);
-
+    }
+    else if (CURRENT_MODE == OFFLINE){
+        Serial.println(payload);
+    }
 
     //save data for PLX-DAQ serial monitor
     //Serial.print("DATA,DATE,TIME,");
@@ -820,18 +839,19 @@ void LEDFunction (int battStatus){
 
 void loop()
 {
-    Portal.handleClient();
-    timeClient.update();
-
-    if (!tb.connected()) {
-        // Connect to the ThingsBoard
-        Serial.print("Connecting to: ");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(" with token ");
-        Serial.println(TOKEN);
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
-            Serial.println("Failed to connect");
-            return;
+    if (CURRENT_MODE == WIFI){
+        timeClient.update();
+        Portal.handleClient();
+        if (!tb.connected()) {
+            // Connect to the ThingsBoard
+            Serial.print("Connecting to: ");
+            Serial.print(THINGSBOARD_SERVER);
+            Serial.print(" with token ");
+            Serial.println(TOKEN);
+            if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
+                Serial.println("Failed to connect");
+                return;
+            }
         }
     }
     //voltage read
@@ -852,7 +872,7 @@ void loop()
         battStatus = 2;
     }
 
-    current_time_LED = millis();                              //get current time for LED function
+    current_time_LED = millis();                             //get current time for LED function
     elapsed_time_LED = current_time_LED - previous_time_LED;  //calculate elapsed time for LED function
     LEDFunction(battStatus);
 
@@ -899,31 +919,24 @@ void loop()
 
         if (n_buffer_count > 99)
         {
-            // Serial.println("xasdasdx!!!");
             estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
-            if (n_spo2 == -999){
-                Serial.println("Probe error!!!!");
+            if (CURRENT_MODE == WIFI){
                 tb.sendTelemetryData("SpO2", n_spo2);
-
                 tb.sendTelemetryData("Pulse rate", n_heart_rate);
             }
-            else
-            {
-
-                // Serial.print(" Sp02 : ");
-                // Serial.print(n_spo2);
-                // Serial.print("% ,");
-                // Serial.print("Pulse rate :");
-                // Serial.println(n_heart_rate);
-                tb.sendTelemetryData("SpO2", n_spo2);
-
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
+            else if(CURRENT_MODE == OFFLINE){
+                Serial.print("Sp02: ");
+                Serial.println(n_spo2);
+                Serial.print("Pulse rate: ");
+                Serial.println(n_heart_rate);
             }
             n_buffer_count = 0;
         }
         afe44xx_data_ready = false;
         drdy_trigger = LOW;
         attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
-        tb.loop();
+        if (CURRENT_MODE == WIFI){
+            tb.loop();
+        }
     }
 }
