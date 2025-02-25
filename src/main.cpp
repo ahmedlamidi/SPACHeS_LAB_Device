@@ -104,12 +104,12 @@ void setup() {
     pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
     pBLEScan->setActiveScan(true);
 
-    Serial.println("Scanning for BLE devices...");
-    while (!connectedBLE) {
-        pBLEScan->start(5, false);  // Keep scanning every 5 seconds
-        delay(1000);
-    }
-    Serial.println("BLE device connected!");
+    // Serial.println("Scanning for BLE devices...");
+    // while (!connectedBLE) {
+    //     pBLEScan->start(5, false);  // Keep scanning every 5 seconds
+    //     delay(1000);
+    // }
+    // Serial.println("BLE device connected!");
 }
 
 void loop() {
@@ -128,6 +128,7 @@ void loop() {
     int receivedValue = random(90, 100);  // Simulating a SpO2 reading
     Serial.print("Sending telemetry: ");
     Serial.println(receivedValue);
+    tb.sendTelemetryData("Hello", receivedValue);
     
 
     tb.loop(); // Maintain MQTT connection
