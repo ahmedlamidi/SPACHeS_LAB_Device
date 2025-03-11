@@ -292,7 +292,7 @@ void setup()
 
     analogReadResolution(12);
     //SPI.begin();
-    SPI.begin(14,12,13,15);
+    SPI.begin(14,12,13,15); // these are pin numbers for SPI
 
     // set the directions
     pinMode (RESET, OUTPUT); //Slave Select
