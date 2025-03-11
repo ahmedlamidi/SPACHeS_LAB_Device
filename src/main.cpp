@@ -161,10 +161,10 @@ const int SPIDRDY = 4;  // data ready pin - IO4
 volatile int drdy_trigger = LOW;
 const int RESET = 0; // reset pin - IO0
 const int PWDN = 2; // powerdown pin - IO2
-#define GRN_LED 27          //TBD after soldering
-#define RED_LED 26          //TBD after soldering
-#define BATTERY_IN 39
-#define CHARGER 18
+#define GRN_LED 47          //TBD after soldering
+#define RED_LED 48          //TBD after soldering
+#define BATTERY_IN 6
+#define CHARGER 16
 
 void afe44xxInit (void);
 void afe44xxWrite (uint8_t address, uint32_t data);
@@ -355,7 +355,8 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     payload += "}";
     payload += "}";
 
-    // Serial.println(payload);
+    Serial.println(payload);
+    Serial.flush();
 
     // Serial.print(time_stamp);
     // Serial.print(",");
@@ -833,6 +834,7 @@ void loop()
             Serial.println("Failed to connect");
             return;
         }
+        Serial.flush();
     }
     //voltage read
     voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
