@@ -44,6 +44,7 @@
 // #define TOKEN "spo2_mark"
 // char thingsboardServer[] = "http://131.247.15.226";
 
+#define AC_DEBUG 
 constexpr char TOKEN[] = "spo2_123";
 constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
 // Thingsboard we want to establish a connection too
@@ -240,6 +241,7 @@ void rootPage(){
 ICACHE_RAM_ATTR void afe44xx_drdy_event()
 {
     drdy_trigger = HIGH;
+    Serial.println("Attached");
 }
 
 
@@ -260,7 +262,7 @@ void setup()
     // Enable saved past credential by autoReconnect option,
     // even once it is disconnected.
     Config.apid = "SpO2ap";
-    Config.apip =  IPAddress(192,168,10,101);
+    Config.apip =  IPAddress(192,168,10,102); // tried to change 4th number is 101
     Config.autoReconnect = false;
     Config.retainPortal = true;
     Config.autoRise = true;
@@ -308,6 +310,7 @@ void setup()
     delay(500);
     pinMode (SPISTE, OUTPUT); //Slave Select
     pinMode (SPIDRDY, INPUT); // data ready
+    
     //  Serial.println(SPISTE);
     //  Serial.println(SS);
     //  Serial.println(digitalRead(SPISTE));
@@ -333,6 +336,8 @@ void setup()
     DataPacketFooter[1] = CES_CMDIF_PKT_STOP;
     afe44xxInit ();
     Serial.println("initialization is done");
+    Serial.println("here");
+    Serial.flush();
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -834,7 +839,9 @@ void loop()
             Serial.println("Failed to connect");
             return;
         }
+        Serial.println("here");
         Serial.flush();
+
     }
     //voltage read
     voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
@@ -863,7 +870,8 @@ void loop()
     // }
 
     if (drdy_trigger == HIGH)
-    {
+    {   
+        Serial.println("DRDY");
         //Serial.println("111111111xxxxxxx!!!");
         detachInterrupt(SPIDRDY);
         afe44xxWrite(CONTROL0, 0x000001);
@@ -872,9 +880,14 @@ void loop()
         REDtemp = afe44xxRead(LED2VAL);
         afe44xx_data_ready = true;
     }
+    else{
+        // Serial.println("DATA not ready");
+        tb.sendTelemetryData("SpO2", 120);
+    }
 
     if (afe44xx_data_ready == true)
     {
+        Serial.println("DATA Ready");
         //Serial.println("xxxxxxx!!!");
         IRtemp = (unsigned long) (IRtemp << 10);
         seegtemp = (signed long) (IRtemp);
@@ -926,6 +939,6 @@ void loop()
         afe44xx_data_ready = false;
         drdy_trigger = LOW;
         attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
-        tb.loop();
     }
+    tb.loop();
 }
