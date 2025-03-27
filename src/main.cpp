@@ -294,7 +294,9 @@ void setup()
 
     analogReadResolution(12);
     //SPI.begin();
+
     SPI.begin(14,12,13,15); // these are pin numbers for SPI
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE1));
 
     // set the directions
     pinMode (RESET, OUTPUT); //Slave Select
@@ -881,8 +883,9 @@ void loop()
         afe44xx_data_ready = true;
     }
     else{
-        // Serial.println("DATA not ready");
-        tb.sendTelemetryData("SpO2", 120);
+        Serial.print("DRDY pin state: ");
+        Serial.println(digitalRead(SPIDRDY));
+        delay(100);
     }
 
     if (afe44xx_data_ready == true)
