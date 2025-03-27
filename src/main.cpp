@@ -261,26 +261,26 @@ void setup()
     digitalWrite(RED_LED, HIGH);
     // Enable saved past credential by autoReconnect option,
     // even once it is disconnected.
-    Config.apid = "SpO2ap";
-    Config.apip =  IPAddress(192,168,10,102); // tried to change 4th number is 101
-    Config.autoReconnect = false;
-    Config.retainPortal = true;
-    Config.autoRise = true;
-    //Config.preserveAPMode = true;
-    Config.immediateStart = true;
-    Config.hostName = "esp32-01";
-    Portal.config(Config);
-    Server.on("/", rootPage);
-    // Establish a connection with an autoReconnect option.
+    // Config.apid = "SpO2ap";
+    // Config.apip =  IPAddress(192,168,10,102); // tried to change 4th number is 101
+    // Config.autoReconnect = false;
+    // Config.retainPortal = true;
+    // Config.autoRise = true;
+    // //Config.preserveAPMode = true;
+    // Config.immediateStart = true;
+    // Config.hostName = "esp32-01";
+    // Portal.config(Config);
+    // Server.on("/", rootPage);
+    // // Establish a connection with an autoReconnect option.
 
-    if (Portal.begin()) {
-        Serial.println("WiFi connected: " + WiFi.localIP().toString());
-        Serial.println(WiFi.getHostname());
-    }
-    timeClient.begin();
-    timeClient.update();
-    start_epoch_time = timeClient.getEpochTime();
-    start_milli_time = millis();
+    // if (Portal.begin()) {
+    //     Serial.println("WiFi connected: " + WiFi.localIP().toString());
+    //     Serial.println(WiFi.getHostname());
+    // }
+    // timeClient.begin();
+    // timeClient.update();
+    // start_epoch_time = timeClient.getEpochTime();
+    // start_milli_time = millis();
 
     //set up for data saving
     Serial.println("CLEARDATA");
@@ -377,7 +377,7 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
 
     size_t json_size = measureJson(doc); // Get the size of the JsonDocument
-    bool result = tb.sendTelemetryJson(doc, json_size);
+    // bool result = tb.sendTelemetryJson(doc, json_size);
     Serial.println(result);
 
 
@@ -828,23 +828,23 @@ void LEDFunction (int battStatus){
 
 void loop()
 {
-    Portal.handleClient();
-    timeClient.update();
+    // Portal.handleClient();
+    // timeClient.update();
 
-    if (!tb.connected()) {
-        // Connect to the ThingsBoard
-        Serial.print("Connecting to: ");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(" with token ");
-        Serial.println(TOKEN);
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
-            Serial.println("Failed to connect");
-            return;
-        }
-        Serial.println("here");
-        Serial.flush();
+    // if (!tb.connected()) {
+    //     // Connect to the ThingsBoard
+    //     Serial.print("Connecting to: ");
+    //     Serial.print(THINGSBOARD_SERVER);
+    //     Serial.print(" with token ");
+    //     Serial.println(TOKEN);
+    //     if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
+    //         Serial.println("Failed to connect");
+    //         return;
+    //     }
+    //     Serial.println("here");
+    //     Serial.flush();
 
-    }
+    // }
     //voltage read
     voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
     percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
@@ -921,9 +921,12 @@ void loop()
             estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
             if (n_spo2 == -999){
                 Serial.println("Probe error!!!!");
-                tb.sendTelemetryData("SpO2", n_spo2);
+                Serial.print("SpO2: ");
+                Serial.println(n_spo2);
 
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
+                Serial.print("Pulse rate: ");
+                Serial.println(n_heart_rate);
+                
             }
             else
             {
@@ -933,9 +936,11 @@ void loop()
                 // Serial.print("% ,");
                 // Serial.print("Pulse rate :");
                 // Serial.println(n_heart_rate);
-                tb.sendTelemetryData("SpO2", n_spo2);
+                Serial.print("SpO2: ");
+                Serial.println(n_spo2);
 
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
+                Serial.print("Pulse rate: ");
+                Serial.println(n_heart_rate);
             }
             n_buffer_count = 0;
         }
@@ -943,5 +948,5 @@ void loop()
         drdy_trigger = LOW;
         attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
     }
-    tb.loop();
+    // tb.loop();
 }
