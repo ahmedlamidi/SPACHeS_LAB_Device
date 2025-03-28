@@ -378,7 +378,7 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 
     size_t json_size = measureJson(doc); // Get the size of the JsonDocument
     // bool result = tb.sendTelemetryJson(doc, json_size);
-    Serial.println(result);
+    // Serial.println(result);
 
 
     //save data for PLX-DAQ serial monitor
