@@ -31,6 +31,7 @@
 #include <ThingsBoard.h>     // ThingsBoard IoT platform
 #include <Arduino_MQTT_Client.h> // Arduino-specific MQTT client
 #include <AutoConnect.h>
+#include <esp_now.h>
 
 
 // change path to spiffs and use deep
@@ -44,32 +45,35 @@
 // #define TOKEN "spo2_mark"
 // char thingsboardServer[] = "http://131.247.15.226";
 
-constexpr char TOKEN[] = "spo2_123";
-constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
-// Thingsboard we want to establish a connection too
-constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
-// MQTT port used to communicate with the server, 1883 is the default unencrypted MQTT port.
-constexpr uint16_t THINGSBOARD_PORT = 1883U;
+// constexpr char TOKEN[] = "spo2_123";
+// constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
+// // Thingsboard we want to establish a connection too
+// constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
+// // MQTT port used to communicate with the server, 1883 is the default unencrypted MQTT port.
+// constexpr uint16_t THINGSBOARD_PORT = 1883U;
+
+// REPLACE WITH YOUR RECEIVER MAC Address
+uint8_t broadcastAddress[] = {0x7c, 0xdf, 0xa1, 0xfb, 0x2f, 0x04};
 
 
 WiFiClient espClient; // create a wificlient
 
-Arduino_MQTT_Client mqttClient(espClient); // create arduino mqtt client with the constructor
-ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE); // In version 0.7.0 this means QOS level is set to 1
-int status = WL_IDLE_STATUS;
-unsigned long lastSend;
+// Arduino_MQTT_Client mqttClient(espClient); // create arduino mqtt client with the constructor
+// ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE); // In version 0.7.0 this means QOS level is set to 1
+// int status = WL_IDLE_STATUS;
+// unsigned long lastSend;
 
 //Autoconnect Wifi
-WebServer Server;
-AutoConnect Portal(Server);
-AutoConnectConfig Config;
+// WebServer Server;
+// AutoConnect Portal(Server);
+// AutoConnectConfig Config;
 
 //NTP library to get real time from server
-#define NTP_OFFSET   0 * 60      // In seconds
-#define NTP_INTERVAL 5 * 1000    // In miliseconds
-#define NTP_ADDRESS  "pool.ntp.org"
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
+// #define NTP_OFFSET   0 * 60      // In seconds
+// #define NTP_INTERVAL 5 * 1000    // In miliseconds
+// #define NTP_ADDRESS  "pool.ntp.org"
+// WiFiUDP ntpUDP;
+// NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
 //LED Time Variables
 unsigned long current_time_LED;
@@ -230,11 +234,30 @@ unsigned long start_milli_time;
 unsigned long real_time;
 int ii = 0;
 
-void rootPage(){
-    char content[] = "ESP32 Autoconnect Setup";
-    Server.send(200, "text/plain", content); // send the content to the server
-}
+// void rootPage(){
+//     char content[] = "ESP32 Autoconnect Setup";
+//     Server.send(200, "text/plain", content); // send the content to the server
+// }
 
+typedef struct Data {
+    int32_t n_spo2;  //SPO2 value
+    int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
+    int32_t n_heart_rate; //heart rate value
+    int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
+    uint16_t PPG_R;
+    uint16_t PPG_IR;
+
+} message_information;
+
+message_information Data;
+
+esp_now_peer_info_t peerInfo;
+
+// callback when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
 
 ///////// Gets Fired on DRDY event/////////////////////////////
 ICACHE_RAM_ATTR void afe44xx_drdy_event()
@@ -259,32 +282,54 @@ void setup()
     digitalWrite(RED_LED, HIGH);
     // Enable saved past credential by autoReconnect option,
     // even once it is disconnected.
-    Config.apid = "SpO2ap";
-    Config.apip =  IPAddress(192,168,10,101);
-    Config.autoReconnect = false;
-    Config.retainPortal = true;
-    Config.autoRise = true;
-    //Config.preserveAPMode = true;
-    Config.immediateStart = true;
-    Config.hostName = "esp32-01";
-    Portal.config(Config);
-    Server.on("/", rootPage);
-    // Establish a connection with an autoReconnect option.
+    // Config.apid = "SpO2ap";
+    // Config.apip =  IPAddress(192,168,10,101);
+    // Config.autoReconnect = false;
+    // Config.retainPortal = true;
+    // Config.autoRise = true;
+    // //Config.preserveAPMode = true;
+    // Config.immediateStart = true;
+    // Config.hostName = "esp32-01";
+    // Portal.config(Config);
+    // Server.on("/", rootPage);
+    // // Establish a connection with an autoReconnect option.
 
-    if (Portal.begin()) {
-        Serial.println("WiFi connected: " + WiFi.localIP().toString());
-        Serial.println(WiFi.getHostname());
-    }
-    timeClient.begin();
-    timeClient.update();
-    start_epoch_time = timeClient.getEpochTime();
-    start_milli_time = millis();
+    // if (Portal.begin()) {
+    //     Serial.println("WiFi connected: " + WiFi.localIP().toString());
+    //     Serial.println(WiFi.getHostname());
+    // }
+    // timeClient.begin();
+    // timeClient.update();
+    // start_epoch_time = timeClient.getEpochTime();
+    // start_milli_time = millis();
 
     //set up for data saving
-    Serial.println("CLEARDATA");
-    Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
-    Serial.println("RESETTIMER");
-    tb.setBufferSize(256);
+    // Serial.println("CLEARDATA");
+    // Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
+    // Serial.println("RESETTIMER");
+    // tb.setBufferSize(256);
+
+
+    WiFi.mode(WIFI_STA);
+
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("Error initializing ESP-NOW");
+        return;
+    }
+
+    esp_now_register_send_cb(OnDataSent);
+
+     // Register peer
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;  
+    peerInfo.encrypt = false;
+
+    if (esp_now_add_peer(&peerInfo) != ESP_OK){
+        Serial.println("Failed to add peer");
+        return;
+    }
+
+
 
 
     Serial.println("Intilazition AFE44xx.. ");
@@ -342,18 +387,30 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     time_stamp = ((start_epoch_time * 1000) + (real_time - start_milli_time));
     char PPG_data[1500];
 
-    String payload = "{";
-    payload += "\"ts\": ";
-    char buffer[20];
-    sprintf(buffer, "%llu", time_stamp);
-    payload += buffer;
-    payload += ",";
-    payload += "\"values\": ";
-    payload += "{";
-    payload += "\"PPG_IR\": "; payload += aun_ir_buffer[n_buffer_count]; payload += ",";
-    payload += "\"PPG_R\":"; payload += aun_red_buffer[n_buffer_count];
-    payload += "}";
-    payload += "}";
+    // String payload = "{";
+    // payload += "\"ts\": ";
+    // char buffer[20];
+    // sprintf(buffer, "%llu", time_stamp);
+    // payload += buffer;
+    // payload += ",";
+    // payload += "\"values\": ";
+    // payload += "{";
+    // payload += "\"PPG_IR\": "; payload += aun_ir_buffer[n_buffer_count]; payload += ",";
+    // payload += "\"PPG_R\":"; payload += aun_red_buffer[n_buffer_count];
+    // payload += "}";
+    // payload += "}";
+
+    Data.PPG_IR = aun_ir_buffer[n_buffer_count];
+    Data.PPG_R = aun_red_buffer[n_buffer_count];
+
+    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &Data, sizeof(Data));
+   
+    if (result == ESP_OK) {
+      Serial.println("Sent with success");
+    }
+    else {
+      Serial.println("Error sending the data");
+    }
 
     // Serial.println(payload);
 
@@ -365,12 +422,12 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     // payload.toCharArray(PPG_data, 1500);
     // tb.sendTelemetryJson(PPG_data);
 
-    DynamicJsonDocument doc(1500); // Define the JsonDocument size
-    deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
+    // DynamicJsonDocument doc(1500); // Define the JsonDocument size
+    // deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
 
-    size_t json_size = measureJson(doc); // Get the size of the JsonDocument
-    bool result = tb.sendTelemetryJson(doc, json_size);
-    Serial.println(result);
+    // size_t json_size = measureJson(doc); // Get the size of the JsonDocument
+    // bool result = tb.sendTelemetryJson(doc, json_size);
+    // Serial.println(result);
 
 
     //save data for PLX-DAQ serial monitor
@@ -410,34 +467,34 @@ void printArray(int32_t  *arr, char *name, int32_t size_n) {
 }
 
 
-void reconnect() {
-    // Loop until we're reconnected
-    while (!tb.connected()) {
-        status = WiFi.status();
-        //if ( status != WL_CONNECTED) {
-        //WiFi.begin(WIFI_AP, WIFI_PASSWORD);
-        //while (WiFi.status() != WL_CONNECTED) {
-        //delay(500);
-//        Serial.print(".");
-        //}
-        //Serial.println("Connected to AP");
-        //}
-        Serial.print(status);
-        Serial.print("Connecting to ThingsBoard node ...");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(TOKEN);
-        if ( tb.connect(THINGSBOARD_SERVER, TOKEN) ) {
-            Serial.println( "[DONE]" );
-        }
-        else {
-            Serial.print( "[FAILED]" );
-            // Serial.println(tb.getError());
-            Serial.println( " : retrying in 5 seconds]" );
-            // Wait 5 seconds before retrying
-            delay( 5000 );
-        }
-    }
-}
+// void reconnect() {
+//     // Loop until we're reconnected
+//     while (!tb.connected()) {
+//         status = WiFi.status();
+//         //if ( status != WL_CONNECTED) {
+//         //WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+//         //while (WiFi.status() != WL_CONNECTED) {
+//         //delay(500);
+// //        Serial.print(".");
+//         //}
+//         //Serial.println("Connected to AP");
+//         //}
+//         Serial.print(status);
+//         Serial.print("Connecting to ThingsBoard node ...");
+//         Serial.print(THINGSBOARD_SERVER);
+//         Serial.print(TOKEN);
+//         if ( tb.connect(THINGSBOARD_SERVER, TOKEN) ) {
+//             Serial.println( "[DONE]" );
+//         }
+//         else {
+//             Serial.print( "[FAILED]" );
+//             // Serial.println(tb.getError());
+//             Serial.println( " : retrying in 5 seconds]" );
+//             // Wait 5 seconds before retrying
+//             delay( 5000 );
+//         }
+//     }
+// }
 
 ////////////////AFE44xx initialization//////////////////////////////////////////
 void afe44xxInit (void)
@@ -681,10 +738,15 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
         n_peak_interval_sum = n_peak_interval_sum / (n_npks - 1);
         *pn_heart_rate = (int32_t)( (60000) / n_peak_interval_sum );
         *pch_hr_valid  = 1;
+        Data.n_heart_rate = (int32_t)( (60000) / n_peak_interval_sum );
+        Data.ch_hr_valid = 1;
     }
     else  {
         *pn_heart_rate = -999; // unable to calculate because # of peaks are too small
         *pch_hr_valid  = 0;
+
+        Data.n_heart_rate = -999;
+        Data.ch_hr_valid = 0;
     }
 
     //  load raw value again for SPO2 calculation : RED(=y) and IR(=X)
@@ -753,10 +815,15 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
         n_spo2_calc = uch_spo2_table[n_ratio_average] ;
         *pn_spo2 = n_spo2_calc ;
         *pch_spo2_valid  = 1;//  float_SPO2 =  -45.060*n_ratio_average* n_ratio_average/10000 + 30.354 *n_ratio_average/100 + 94.845 ;  // for comparison with table
+        Data.n_spo2 = n_spo2_calc;
+        Data.ch_spo2_valid = 1;
     }
     else {
         *pn_spo2 =  -999 ; // do not use SPO2 since signal an_ratio is out of range
         *pch_spo2_valid  = 0;
+
+        Data.n_spo2 = -999;
+        Data.ch_spo2_valid = 0;
     }
 }
 
@@ -820,20 +887,20 @@ void LEDFunction (int battStatus){
 
 void loop()
 {
-    Portal.handleClient();
-    timeClient.update();
+    // Portal.handleClient();
+    // timeClient.update();
 
-    if (!tb.connected()) {
-        // Connect to the ThingsBoard
-        Serial.print("Connecting to: ");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(" with token ");
-        Serial.println(TOKEN);
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
-            Serial.println("Failed to connect");
-            return;
-        }
-    }
+    // if (!tb.connected()) {
+    //     // Connect to the ThingsBoard
+    //     Serial.print("Connecting to: ");
+    //     Serial.print(THINGSBOARD_SERVER);
+    //     Serial.print(" with token ");
+    //     Serial.println(TOKEN);
+    //     if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
+    //         Serial.println("Failed to connect");
+    //         return;
+    //     }
+    // }
     //voltage read
     voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
     percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
@@ -901,29 +968,29 @@ void loop()
         {
             // Serial.println("xasdasdx!!!");
             estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
-            if (n_spo2 == -999){
-                Serial.println("Probe error!!!!");
-                tb.sendTelemetryData("SpO2", n_spo2);
+            // if (n_spo2 == -999){
+            //     Serial.println("Probe error!!!!");
+            //     tb.sendTelemetryData("SpO2", n_spo2);
 
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            }
-            else
-            {
+            //     tb.sendTelemetryData("Pulse rate", n_heart_rate);
+            // }
+            // else
+            // {
 
-                // Serial.print(" Sp02 : ");
-                // Serial.print(n_spo2);
-                // Serial.print("% ,");
-                // Serial.print("Pulse rate :");
-                // Serial.println(n_heart_rate);
-                tb.sendTelemetryData("SpO2", n_spo2);
+            //     // Serial.print(" Sp02 : ");
+            //     // Serial.print(n_spo2);
+            //     // Serial.print("% ,");
+            //     // Serial.print("Pulse rate :");
+            //     // Serial.println(n_heart_rate);
+            //     tb.sendTelemetryData("SpO2", n_spo2);
 
-                tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            }
+            //     tb.sendTelemetryData("Pulse rate", n_heart_rate);
+            // }
             n_buffer_count = 0;
         }
         afe44xx_data_ready = false;
         drdy_trigger = LOW;
         attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
-        tb.loop();
+        // tb.loop();
     }
 }
