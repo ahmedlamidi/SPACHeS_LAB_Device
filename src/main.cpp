@@ -1,215 +1,119 @@
-#include <SPI.h>
+#include <esp_now.h>
+#include <WiFi.h>
 #include <Arduino.h>
-#define SPI_MISO    12  // Adjust based on PCB
-#define SPI_MOSI    13  // Adjust based on PCB
-#define SPI_SCK     14  // Adjust based on PCB
-#define SPI_CS      15  // Adjust based on PCB
-#define ADC_RDY     4   // ADC Ready Pin (Interrupt)
-#define AFE_PDN     2   // Power Down Pin
-#define AFE_RESET   0   // Reset Pin
+#include <WiFi.h>
+#include <WebServer.h>
+#include <AutoConnect.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+#include <Arduino_MQTT_Client.h>
+#include <ThingsBoard.h>
+// #include <BLEDevice.h>
+// #include <BLEScan.h>
+// #include <BLEAdvertisedDevice.h>
 
-//Pin declarations
-const int SPISTE = 15;  // chip select - IO15
-const int SPIDRDY = 4;  // data ready pin - IO4
-volatile int drdy_trigger = LOW;
-const int RESET = 0; // reset pin - IO0
-const int PWDN = 2; // powerdown pin - IO2
+// Structure example to receive data
+// Must match the sender structure
+typedef struct Data {
+    int32_t n_spo2;  //SPO2 value
+    int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
+    int32_t n_heart_rate; //heart rate value
+    int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
+    uint16_t PPG_R;
+    uint16_t PPG_IR;
 
+} message_information;
 
-//afe44xx Register definition
-#define CONTROL0    0x00
-#define LED2STC     0x01
-#define LED2ENDC    0x02
-#define LED2LEDSTC    0x03
-#define LED2LEDENDC   0x04
-#define ALED2STC    0x05
-#define ALED2ENDC   0x06
-#define LED1STC     0x07
-#define LED1ENDC    0x08
-#define LED1LEDSTC    0x09
-#define LED1LEDENDC   0x0a
-#define ALED1STC    0x0b
-#define ALED1ENDC   0x0c
-#define LED2CONVST    0x0d
-#define LED2CONVEND   0x0e
-#define ALED2CONVST   0x0f
-#define ALED2CONVEND  0x10
-#define LED1CONVST    0x11
-#define LED1CONVEND   0x12
-#define ALED1CONVST   0x13
-#define ALED1CONVEND  0x14
-#define ADCRSTCNT0    0x15
-#define ADCRSTENDCT0  0x16
-#define ADCRSTCNT1    0x17
-#define ADCRSTENDCT1  0x18
-#define ADCRSTCNT2    0x19
-#define ADCRSTENDCT2  0x1a
-#define ADCRSTCNT3    0x1b
-#define ADCRSTENDCT3  0x1c
-#define PRPCOUNT    0x1d
-#define CONTROL1    0x1e
-#define SPARE1      0x1f
-#define TIAGAIN     0x20
-#define TIA_AMB_GAIN  0x21
-#define LEDCNTRL    0x22
-#define CONTROL2    0x23
-#define SPARE2      0x24
-#define SPARE3      0x25
-#define SPARE4      0x26
-#define SPARE4      0x26
-#define RESERVED1   0x27
-#define RESERVED2   0x28
-#define ALARM     0x29
-#define LED2VAL     0x2a
-#define ALED2VAL    0x2b
-#define LED1VAL     0x2c
-#define ALED1VAL    0x2d
-#define LED2ABSVAL    0x2e
-#define LED1ABSVAL    0x2f
-#define DIAG      0x30
-#define count 60
+// Create a struct_message called myData
+message_information myData;
 
-void afe44xxInit (void);
-void afe44xxWrite (uint8_t address, uint32_t data);
-unsigned long afe44xxRead (uint8_t address);
-
-volatile int afe44xx_data_ready = false;
-
-
-///////// Gets Fired on DRDY event/////////////////////////////
-ICACHE_RAM_ATTR void afe44xx_drdy_event()
-{
-    drdy_trigger = HIGH;
+// callback function that will be executed when data is received
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  memcpy(&myData, incomingData, sizeof(myData));
+  Serial.print("Bytes received: ");
+  tb.sendTelemetryData("SPo2", myData.n_spo2);
+  tb.sendTelemetryData("PPG_R", myData.PPG_R);
+  tb.sendTelemetryData("PPG_IR", myData.PPG_IR);
+  tb.sendTelemetryData("Pulse rate", myData.n_heart_rate);
 }
 
 
-void afe44xxInit (void)
-{
-    //  Serial.println("afe44xx Initialization Starts");
-    afe44xxWrite(CONTROL0, 0x000000);
+constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
+constexpr uint16_t THINGSBOARD_PORT = 1883U;
+constexpr char TOKEN[] = "spo2_123";
+constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
 
-    afe44xxWrite(CONTROL0, 0x000008);
+// MQTT and ThingsBoard objects
+WiFiClient espClient;
+Arduino_MQTT_Client mqttClient(espClient);
+ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 
-    afe44xxWrite(TIAGAIN, 0x000000); // CF = 5pF, RF = 500kR
-    afe44xxWrite(TIA_AMB_GAIN, 0x000001);
+// Web Server and AutoConnect for Wi-Fi configuration
+WebServer Server;
+AutoConnect Portal(Server);
+AutoConnectConfig Config;
 
-    afe44xxWrite(LEDCNTRL, 0x001414);
-    afe44xxWrite(CONTROL2, 0x000000); // LED_RANGE=100mA, LED=50mA
-    afe44xxWrite(CONTROL1, 0x010707); // Timers ON, average 3 samples
+#define NTP_OFFSET   0 * 60      // In seconds
+#define NTP_INTERVAL 5 * 1000    // In milliseconds
+#define NTP_ADDRESS  "pool.ntp.org"
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
-    afe44xxWrite(PRPCOUNT, 0X001F3F);
-
-    afe44xxWrite(LED2STC, 0X001770);
-    afe44xxWrite(LED2ENDC, 0X001F3E);
-    afe44xxWrite(LED2LEDSTC, 0X001770);
-    afe44xxWrite(LED2LEDENDC, 0X001F3F);
-    afe44xxWrite(ALED2STC, 0X000000);
-    afe44xxWrite(ALED2ENDC, 0X0007CE);
-    afe44xxWrite(LED2CONVST, 0X000002);
-    afe44xxWrite(LED2CONVEND, 0X0007CF);
-    afe44xxWrite(ALED2CONVST, 0X0007D2);
-    afe44xxWrite(ALED2CONVEND, 0X000F9F);
-
-    afe44xxWrite(LED1STC, 0X0007D0);
-    afe44xxWrite(LED1ENDC, 0X000F9E);
-    afe44xxWrite(LED1LEDSTC, 0X0007D0);
-    afe44xxWrite(LED1LEDENDC, 0X000F9F);
-    afe44xxWrite(ALED1STC, 0X000FA0);
-    afe44xxWrite(ALED1ENDC, 0X00176E);
-    afe44xxWrite(LED1CONVST, 0X000FA2);
-    afe44xxWrite(LED1CONVEND, 0X00176F);
-    afe44xxWrite(ALED1CONVST, 0X001772);
-    afe44xxWrite(ALED1CONVEND, 0X001F3F);
-
-    afe44xxWrite(ADCRSTCNT0, 0X000000);
-    afe44xxWrite(ADCRSTENDCT0, 0X000000);
-    afe44xxWrite(ADCRSTCNT1, 0X0007D0);
-    afe44xxWrite(ADCRSTENDCT1, 0X0007D0);
-    afe44xxWrite(ADCRSTCNT2, 0X000FA0);
-    afe44xxWrite(ADCRSTENDCT2, 0X000FA0);
-    afe44xxWrite(ADCRSTCNT3, 0X001770);
-    afe44xxWrite(ADCRSTENDCT3, 0X001770);
-
-    delay(1000);
-//  Serial.println("afe44xx Initialization Done");
-}
-
-
-void afe44xxWrite (uint8_t address, uint32_t data)
-{
-    digitalWrite (SS, LOW); // enable device
-    SPI.transfer (address); // send address to device
-    SPI.transfer ((data >> 16) & 0xFF); // write top 8 bits
-    SPI.transfer ((data >> 8) & 0xFF); // write middle 8 bits
-    SPI.transfer (data & 0xFF); // write bottom 8 bits
-    digitalWrite (SS, HIGH); // disable device
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-unsigned long afe44xxRead (uint8_t address)
-{
-    unsigned long data = 0;
-    digitalWrite (SS, LOW); // enable device
-    SPI.transfer (address); // send address to device
-    //SPI.transfer (data);
-    data |= ((unsigned long)SPI.transfer (0) << 16); // read top 8 bits data
-    data |= ((unsigned long)SPI.transfer (0) << 8); // read middle 8 bits  data
-    data |= SPI.transfer (0); // read bottom 8 bits data
-    digitalWrite (SS, HIGH); // disable device
-
-
-    return data; // return with 24 bits of read data
+void rootPage() {
+    Server.send(200, "text/plain", "ESP32 AutoConnect Setup");
 }
 
 void setup() {
     Serial.begin(115200);
-    SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, SPI_CS); // all good
-    pinMode (RESET, OUTPUT); //Slave Select
-    pinMode (PWDN, OUTPUT); //Slave Select
+    
+    // Configure AutoConnect
+    Config.apid = "SpO2ap";
+    Config.apip = IPAddress(192,168,10,101);
+    Config.autoReconnect = true;
+    Config.retainPortal = true;
+    Config.autoRise = true;
+    Config.immediateStart = true;
+    Config.hostName = "esp32-01";
+    Portal.config(Config);
+    Server.on("/", rootPage);
 
-    digitalWrite(RESET, LOW);
-    delay(500);
-    digitalWrite(RESET, HIGH);
-    delay(500);
-    digitalWrite(PWDN, LOW);
-    delay(500);
-    digitalWrite(PWDN, HIGH);
-    delay(500);
-    pinMode (SPISTE, OUTPUT); //Slave Select
-    pinMode (SPIDRDY, INPUT); // data ready
-    attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING); // Digital2 is attached to Data ready pin of AFE is interrupt0 in ARduino
-    SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
-    SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
-    SPI.setBitOrder (MSBFIRST);   
-    afe44xxInit ();
-}
+    // Start Wi-Fi AutoConnect
+    if (Portal.begin()) {
+        Serial.println("WiFi connected: " + WiFi.localIP().toString());
+    } else {
+        Serial.println("Failed to connect to WiFi.");
+    }
 
-uint8_t spi_transfer(uint8_t data) {
-    digitalWrite(SS, LOW);
-    uint8_t received = SPI.transfer(data);
-    digitalWrite(SS, HIGH);
-    return received;
+    // Start NTP Client
+    timeClient.begin();
+
+
+      // Set device as a Wi-Fi Station
+  WiFi.mode(WIFI_STA);
+
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+  
+  // Once ESPNow is successfully Init, we will register for recv CB to
+  // get recv packer info
+  esp_now_register_recv_cb(esp_now_recv_cb_t(OnDataRecv));
 }
 
 void loop() {
-    if(drdy_trigger == HIGH){
-        detachInterrupt(SPIDRDY);
-        afe44xxWrite(CONTROL0, 0x000001);
-        int pinState = digitalRead(ADC_RDY);
-        if (pinState == HIGH) {
-            Serial.println("Pin is HIGH");
-            } else {
-            Serial.println("Pin is LOW");
-            }
-        unsigned long IRtemp = afe44xxRead(LED1VAL);
-        afe44xxWrite(CONTROL0, 0x000001);
-        Serial.println(IRtemp);
-        // Print the state of the pin
-        afe44xx_data_ready = false;
-        drdy_trigger = LOW;
-        attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
+    Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
+    
+    // Ensure MQTT Connection
+    if (!tb.connected()) {
+        Serial.println("Reconnecting to ThingsBoard...");
+        if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
+            Serial.println("Failed to connect to ThingsBoard!");
+            return;
+        }
     }
-    else{
-        Serial.println("no");
-    }
+    
+    tb.loop(); // Maintain MQTT connection
+    delay(5000);
 }
