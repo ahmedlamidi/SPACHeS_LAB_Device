@@ -53,7 +53,7 @@
 // constexpr uint16_t THINGSBOARD_PORT = 1883U;
 
 // REPLACE WITH YOUR RECEIVER MAC Address
-uint8_t broadcastAddress[] = {0x7c, 0xdf, 0xa1, 0xfb, 0x2f, 0x04};
+uint8_t broadcastAddress[] = {0x7c, 0xdf, 0xa1, 0xfb, 0x2c, 0x30};
 
 
 WiFiClient espClient; // create a wificlient
@@ -907,9 +907,12 @@ void loop()
     if(voltage > 4.19) percentage = 100; //upper limit
     if(voltage < 3.5) percentage = 0; //Lower limit
 
-    //Charge logic
+    // Charge logic
     if(voltage > 4.1) digitalWrite(CHARGER, LOW);
     if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
+
+    // To make the battery ot work
+    // digitalWrite(CHARGER, LOW);
 
     if(percentage < 33){
         battStatus = 0;
