@@ -841,8 +841,10 @@ void loop()
     if(voltage < 3.5) percentage = 0; //Lower limit
 
     //Charge logic
-    if(voltage > 4.1) digitalWrite(CHARGER, LOW);
-    if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
+    // if(voltage > 4.1) digitalWrite(CHARGER, LOW);
+    // if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
+
+    digitalWrite(CHARGER, LOW);
 
     if(percentage < 33){
         battStatus = 0;
