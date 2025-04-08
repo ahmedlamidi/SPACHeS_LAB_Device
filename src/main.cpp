@@ -2,7 +2,6 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <Arduino.h>
-#include <WiFi.h>
 #include <WebServer.h>
 #include <AutoConnect.h>
 #include <WiFiUdp.h>
@@ -45,6 +44,7 @@ message_information myData;
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   memcpy(&myData, incomingData, sizeof(myData));
   Serial.print("Bytes received: ");
+  Serial.print("SPO2: "); Serial.println(myData.n_spo2);
   tb.sendTelemetryData("SPo2", myData.n_spo2);
   tb.sendTelemetryData("PPG_R", myData.PPG_R);
   tb.sendTelemetryData("PPG_IR", myData.PPG_IR);
@@ -102,7 +102,7 @@ void setup() {
   
   // Once ESPNow is successfully Init, we will register for recv CB to
   // get recv packer info
-  esp_now_register_recv_cb(esp_now_recv_cb_t(OnDataRecv));
+  esp_now_register_recv_cb((OnDataRecv));
 }
 
 void loop() {
