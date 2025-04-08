@@ -53,7 +53,7 @@
 // constexpr uint16_t THINGSBOARD_PORT = 1883U;
 
 // REPLACE WITH YOUR RECEIVER MAC Address
-uint8_t broadcastAddress[] = {0x7c, 0xdf, 0xa1, 0xfb, 0x2c, 0x30};
+uint8_t broadcastAddress[] = {0x34, 0xcd, 0xb0, 0x06, 0x67, 0x60};
 
 
 WiFiClient espClient; // create a wificlient
