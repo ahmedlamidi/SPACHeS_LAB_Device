@@ -8,6 +8,7 @@
 #include <NTPClient.h>
 #include <Arduino_MQTT_Client.h>
 #include <ThingsBoard.h>
+#include <SPIFFS.h>
 // #include <BLEDevice.h>
 // #include <BLEScan.h>
 // #include <BLEAdvertisedDevice.h>
@@ -24,6 +25,18 @@ typedef struct Data {
 
 } message_information;
 
+
+constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
+constexpr uint16_t THINGSBOARD_PORT = 1883U;
+constexpr char TOKEN[] = "spo2_123";
+constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
+
+// MQTT and ThingsBoard objects
+WiFiClient espClient;
+Arduino_MQTT_Client mqttClient(espClient);
+ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
+
+
 // Create a struct_message called myData
 message_information myData;
 
@@ -36,17 +49,6 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   tb.sendTelemetryData("PPG_IR", myData.PPG_IR);
   tb.sendTelemetryData("Pulse rate", myData.n_heart_rate);
 }
-
-
-constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
-constexpr uint16_t THINGSBOARD_PORT = 1883U;
-constexpr char TOKEN[] = "spo2_123";
-constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
-
-// MQTT and ThingsBoard objects
-WiFiClient espClient;
-Arduino_MQTT_Client mqttClient(espClient);
-ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 
 // Web Server and AutoConnect for Wi-Fi configuration
 WebServer Server;
