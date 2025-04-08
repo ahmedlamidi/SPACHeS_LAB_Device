@@ -90,10 +90,6 @@ void setup() {
     // Start NTP Client
     timeClient.begin();
 
-
-      // Set device as a Wi-Fi Station
-  WiFi.mode(WIFI_STA);
-
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
@@ -118,5 +114,4 @@ void loop() {
     }
     
     tb.loop(); // Maintain MQTT connection
-    delay(5000);
 }
