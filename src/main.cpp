@@ -964,6 +964,7 @@ void loop()
             time_stamps[n_buffer_count] = millis();
             //send data to Thingsboard
             getAndSendPPG(n_buffer_count, time_stamps[n_buffer_count]);
+            delay(10);
             n_buffer_count++;
             dec = 0;
 
