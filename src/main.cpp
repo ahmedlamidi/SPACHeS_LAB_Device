@@ -13,6 +13,14 @@
 // #include <BLEScan.h>
 // #include <BLEAdvertisedDevice.h>
 
+
+//NTP library to get real time from server
+#define NTP_OFFSET   0 * 60      // In seconds
+#define NTP_INTERVAL 5 * 1000    // In miliseconds
+#define NTP_ADDRESS  "pool.ntp.org"
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
+
 // Structure example to receive data
 // Must match the sender structure
 typedef struct Data {
@@ -20,16 +28,19 @@ typedef struct Data {
     int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
     int32_t n_heart_rate; //heart rate value
     int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
+    unsigned long start_milli_time;
     uint16_t PPG_R;
     uint16_t PPG_IR;
 
 } message_information;
 
-
 constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
 constexpr uint16_t THINGSBOARD_PORT = 1883U;
 constexpr char TOKEN[] = "spo2_123";
 constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
+unsigned long long start_epoch_time;
+unsigned long long start_milli_time = 0;
+
 
 // MQTT and ThingsBoard objects
 WiFiClient espClient;
@@ -44,23 +55,45 @@ message_information myData;
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   memcpy(&myData, incomingData, sizeof(myData));
   Serial.print("Bytes received: ");
-  Serial.print("SPO2: "); Serial.println(myData.n_spo2);
-  tb.sendTelemetryData("SPo2", myData.n_spo2);
-  tb.sendTelemetryData("PPG_R", myData.PPG_R);
-  tb.sendTelemetryData("PPG_IR", myData.PPG_IR);
-  tb.sendTelemetryData("Pulse rate", myData.n_heart_rate);
+  Serial.print(" SPO2: "); Serial.println(myData.n_spo2);
+
+  // Get timestamp
+  unsigned long long time_stamp = myData.start_milli_time; // or use `esp_timer_get_time()` for microseconds
+
+
+  if(start_milli_time == 0){
+    start_milli_time = time_stamp;
+  }
+  unsigned long long delta = start_milli_time - time_stamp;
+  unsigned actual_time_stamp = ((start_epoch_time * 1000) + (delta));
+  // Construct JSON payload
+  String payload = "{";
+  payload += "\"ts\": ";
+  char buffer[20];
+  sprintf(buffer, "%llu", actual_time_stamp);
+  payload += buffer;
+  payload += ",";
+  payload += "\"values\":{";
+  payload += "\"SPo2\":"; payload += myData.n_spo2; payload += ",";
+  payload += "\"PPG_R\":"; payload += myData.PPG_R; payload += ",";
+  payload += "\"PPG_IR\":"; payload += myData.PPG_IR; payload += ",";
+  payload += "\"Pulse rate\":"; payload += myData.n_heart_rate;
+  payload += "}}";
+
+  Serial.println(payload); // optional for debugging
+
+  // Send to ThingsBoard
+     DynamicJsonDocument doc(1500); // Define the JsonDocument size
+    deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
+
+    size_t json_size = measureJson(doc); // Get the size of the JsonDocument
+    bool result = tb.sendTelemetryJson(doc, json_size);
 }
 
 // Web Server and AutoConnect for Wi-Fi configuration
 WebServer Server;
 AutoConnect Portal(Server);
 AutoConnectConfig Config;
-
-#define NTP_OFFSET   0 * 60      // In seconds
-#define NTP_INTERVAL 5 * 1000    // In milliseconds
-#define NTP_ADDRESS  "pool.ntp.org"
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
 void rootPage() {
     Server.send(200, "text/plain", "ESP32 AutoConnect Setup");
@@ -87,8 +120,9 @@ void setup() {
         Serial.println("Failed to connect to WiFi.");
     }
 
-    // Start NTP Client
     timeClient.begin();
+    timeClient.update();
+    start_epoch_time = timeClient.getEpochTime();
 
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
