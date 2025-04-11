@@ -244,12 +244,14 @@ typedef struct Data {
     int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
     int32_t n_heart_rate; //heart rate value
     int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
+    unsigned long start_milli_time;
     uint16_t PPG_R;
     uint16_t PPG_IR;
 
 } message_information;
 
 message_information Data;
+struct timeval tp;
 
 esp_now_peer_info_t peerInfo;
 
@@ -402,6 +404,7 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 
     Data.PPG_IR = aun_ir_buffer[n_buffer_count];
     Data.PPG_R = aun_red_buffer[n_buffer_count];
+    Data.start_milli_time = millis();
 
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &Data, sizeof(Data));
    
