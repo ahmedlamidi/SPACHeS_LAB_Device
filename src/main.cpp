@@ -64,7 +64,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   if(start_milli_time == 0){
     start_milli_time = time_stamp;
   }
-  unsigned long long delta = start_milli_time - time_stamp;
+  unsigned long long delta =  time_stamp - start_milli_time;
   unsigned actual_time_stamp = ((start_epoch_time * 1000) + (delta));
   // Construct JSON payload
   String payload = "{";
@@ -83,9 +83,8 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   Serial.println(payload); // optional for debugging
 
   // Send to ThingsBoard
-     DynamicJsonDocument doc(1500); // Define the JsonDocument size
+    DynamicJsonDocument doc(1500); // Define the JsonDocument size
     deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
-
     size_t json_size = measureJson(doc); // Get the size of the JsonDocument
     bool result = tb.sendTelemetryJson(doc, json_size);
 }
