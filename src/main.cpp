@@ -23,16 +23,7 @@ NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
 // Structure example to receive data
 // Must match the sender structure
-typedef struct Data {
-    int32_t n_spo2;  //SPO2 value
-    int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
-    int32_t n_heart_rate; //heart rate value
-    int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
-    unsigned long start_milli_time;
-    uint16_t PPG_R;
-    uint16_t PPG_IR;
 
-} message_information;
 
 constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
 constexpr uint16_t THINGSBOARD_PORT = 1883U;
@@ -48,45 +39,57 @@ Arduino_MQTT_Client mqttClient(espClient);
 ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 
 
+
+
+#define QUEUE_SIZE 20
+
+struct TelemetryData {
+  int32_t n_spo2;  //SPO2 value
+  int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
+  int32_t n_heart_rate; //heart rate value
+  int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
+  unsigned long start_milli_time;
+  uint16_t PPG_R;
+  uint16_t PPG_IR;
+};
+
+// Ring buffer
+TelemetryData telemetryQueue[QUEUE_SIZE];
+volatile int queueHead = 0;
+volatile int queueTail = 0;
+
+bool isQueueFull() {
+  return ((queueHead + 1) % QUEUE_SIZE) == queueTail;
+}
+
+bool isQueueEmpty() {
+  return queueHead == queueTail;
+}
+
+bool enqueue(const TelemetryData& data) {
+  if (isQueueFull()) return false;
+  telemetryQueue[queueHead] = data;
+  queueHead = (queueHead + 1) % QUEUE_SIZE;
+  return true;
+}
+
+bool dequeue(TelemetryData &data) {
+  if (isQueueEmpty()) return false;
+  data = telemetryQueue[queueTail];
+  queueTail = (queueTail + 1) % QUEUE_SIZE;
+  return true;
+}
+
+
 // Create a struct_message called myData
-message_information myData;
+TelemetryData myData;
 
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  memcpy(&myData, incomingData, sizeof(myData));
-  Serial.print("Bytes received: ");
-  Serial.print(" SPO2: "); Serial.println(myData.n_spo2);
+  memcpy(&myData, incomingData, sizeof(TelemetryData));
+  enqueue(myData); // Add to queue
 
   // Get timestamp
-  unsigned long long time_stamp = myData.start_milli_time; // or use `esp_timer_get_time()` for microseconds
-
-
-  if(start_milli_time == 0){
-    start_milli_time = time_stamp;
-  }
-  unsigned long long delta =  time_stamp - start_milli_time;
-  unsigned actual_time_stamp = ((start_epoch_time * 1000) + (delta));
-  // Construct JSON payload
-  String payload = "{";
-  payload += "\"ts\": ";
-  char buffer[20];
-  sprintf(buffer, "%llu", actual_time_stamp);
-  payload += buffer;
-  payload += ",";
-  payload += "\"values\":{";
-  payload += "\"SPo2\":"; payload += myData.n_spo2; payload += ",";
-  payload += "\"PPG_R\":"; payload += myData.PPG_R; payload += ",";
-  payload += "\"PPG_IR\":"; payload += myData.PPG_IR; payload += ",";
-  payload += "\"Pulse rate\":"; payload += myData.n_heart_rate;
-  payload += "}}";
-
-  Serial.println(payload); // optional for debugging
-
-  // Send to ThingsBoard
-    DynamicJsonDocument doc(1500); // Define the JsonDocument size
-    deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
-    size_t json_size = measureJson(doc); // Get the size of the JsonDocument
-    bool result = tb.sendTelemetryJson(doc, json_size);
 }
 
 // Web Server and AutoConnect for Wi-Fi configuration
@@ -98,9 +101,46 @@ void rootPage() {
     Server.send(200, "text/plain", "ESP32 AutoConnect Setup");
 }
 
+void processTelemetry(){
+
+
+
+  TelemetryData data;
+  while (dequeue(data)) {
+    if (start_milli_time == 0) {
+      start_milli_time = data.start_milli_time;
+    }
+
+    unsigned long long delta = data.start_milli_time - start_milli_time;
+    unsigned long long actual_time_stamp = (start_epoch_time * 1000ULL) + delta;
+
+    String payload = "{";
+    payload += "\"ts\": ";
+    char buffer[20];
+    sprintf(buffer, "%llu", actual_time_stamp);
+    payload += buffer;
+    payload += ",";
+    payload += "\"values\":{";
+    payload += "\"SPo2\":"; payload += data.n_spo2; payload += ",";
+    payload += "\"PPG_R\":"; payload += data.PPG_R; payload += ",";
+    payload += "\"PPG_IR\":"; payload += data.PPG_IR; payload += ",";
+    payload += "\"Pulse rate\":"; payload += data.n_heart_rate;
+    payload += "}}";
+
+    // Serial.println(payload); // For debug
+
+    // Send to ThingsBoard
+    DynamicJsonDocument doc(512);
+    deserializeJson(doc, payload);
+    size_t json_size = measureJson(doc);
+    Serial.println(tb.connected());
+    bool result = tb.sendTelemetryJson(doc, json_size);
+  }
+}
+
 void setup() {
     Serial.begin(115200);
-    
+    WiFi.mode(WIFI_STA);
     // Configure AutoConnect
     Config.apid = "SpO2ap";
     Config.apip = IPAddress(192,168,10,101);
@@ -113,6 +153,7 @@ void setup() {
     Server.on("/", rootPage);
 
     // Start Wi-Fi AutoConnect
+   
     if (Portal.begin()) {
         Serial.println("WiFi connected: " + WiFi.localIP().toString());
     } else {
@@ -122,7 +163,7 @@ void setup() {
     timeClient.begin();
     timeClient.update();
     start_epoch_time = timeClient.getEpochTime();
-
+    // WiFi.mode(WIFI_STA);
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
@@ -136,7 +177,7 @@ void setup() {
 
 void loop() {
     Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
-    
+    processTelemetry();
     // Ensure MQTT Connection
     if (!tb.connected()) {
         Serial.println("Reconnecting to ThingsBoard...");
@@ -145,6 +186,5 @@ void loop() {
             return;
         }
     }
-    
     tb.loop(); // Maintain MQTT connection
 }
