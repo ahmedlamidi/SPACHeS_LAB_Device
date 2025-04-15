@@ -140,15 +140,35 @@ void processTelemetry(){
 
 void setup() {
     Serial.begin(115200);
+
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+      if (event == SYSTEM_EVENT_STA_DISCONNECTED) {
+        Serial.println("Wi-Fi disconnected");
+        esp_now_deinit();
+      } 
+      else if (event == SYSTEM_EVENT_STA_GOT_IP) {
+        Serial.println("Wi-Fi connected with IP");
+        esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
+  
+        if (esp_now_init() != ESP_OK) {
+          Serial.println("ESP-NOW re-init failed");
+          return;
+        }
+  
+        // Re-add your peers here
+      }
+    });
+
     WiFi.mode(WIFI_STA);
     // Configure AutoConnect
     Config.apid = "SpO2ap";
     Config.apip = IPAddress(192,168,10,101);
     Config.autoReconnect = true;
-    Config.retainPortal = true;
+    Config.retainPortal = false;
     Config.autoRise = true;
     Config.immediateStart = true;
     Config.hostName = "esp32-01";
+    Config.channel = 6;
     Portal.config(Config);
     Server.on("/", rootPage);
 
@@ -156,29 +176,52 @@ void setup() {
    
     if (Portal.begin()) {
         Serial.println("WiFi connected: " + WiFi.localIP().toString());
+
+
+        timeClient.begin();
+        timeClient.update();
+        start_epoch_time = timeClient.getEpochTime();
+        int channel = WiFi.channel();
+        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);  // 🔧 Force channel lock
+
+        if (WiFi.status() == WL_CONNECTED) {
+          if (esp_now_init() != ESP_OK) {
+            Serial.println("ESP-NOW init failed");
+            return;
+          }
+          esp_now_register_recv_cb((OnDataRecv));
+        }
+        // WiFi.mode(WIFI_STA);
+      // Init ESP-NOW
+      // Once ESPNow is successfully Init, we will register for recv CB to
+      // get recv packer info
     } else {
         Serial.println("Failed to connect to WiFi.");
     }
-
-    timeClient.begin();
-    timeClient.update();
-    start_epoch_time = timeClient.getEpochTime();
-    // WiFi.mode(WIFI_STA);
-  // Init ESP-NOW
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
-    return;
-  }
-  
-  // Once ESPNow is successfully Init, we will register for recv CB to
-  // get recv packer info
-  esp_now_register_recv_cb((OnDataRecv));
 }
+bool wasDisconnected;
+
 
 void loop() {
     Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
     processTelemetry();
     // Ensure MQTT Connection
+
+    if (WiFi.status() != WL_CONNECTED) {
+      wasDisconnected = true;
+    } else if (wasDisconnected) {
+      Serial.println("Reconnected to WiFi. Reinitializing ESP-NOW...");
+      wasDisconnected = false;
+  
+      esp_now_deinit(); // Clean up first
+      if (esp_now_init() == ESP_OK) {
+        esp_now_register_recv_cb(OnDataRecv);
+        Serial.println("ESP-NOW reinitialized after WiFi reconnect");
+      } else {
+        Serial.println("Failed to reinit ESP-NOW");
+      }
+    }
+
     if (!tb.connected()) {
         Serial.println("Reconnecting to ThingsBoard...");
         if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
