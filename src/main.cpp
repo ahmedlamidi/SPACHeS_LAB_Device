@@ -156,7 +156,7 @@ unsigned long start_time;
 unsigned long end_time;
 
 //Pin declarations
-const int SPISTE = 10;  // chip select - IO15
+const int SPISTE = 15;  // chip select - IO15
 const int SPIDRDY = 4;  // data ready pin - IO4
 volatile int drdy_trigger = LOW;
 const int RESET = 0; // reset pin - IO0
@@ -299,21 +299,19 @@ void setup()
 
     analogReadResolution(12);
    
-    #define Dum1     9 
-    #define Dum2      14
-    #define Dum3      15
+    // #define Dum1     9 
+    // #define Dum2      14
+    // #define Dum3      15
 
 
 
-    pinMode(Dum1, INPUT);
-    pinMode(Dum2, INPUT);
-    pinMode(Dum3, INPUT);
-
-    //SPI.begin();
-    #define SCK 12
-    #define MISO 13
-    #define MOSI 11
-    #define CS 10
+    // pinMode(Dum1, INPUT);
+    // pinMode(Dum2, INPUT);
+    // pinMode(Dum3, INPUT);
+    #define SCK 14
+    #define MISO 12
+    #define MOSI 13
+    #define CS 15
     SPI.begin(SCK, MISO, MOSI, CS); // these are pin numbers for SPI
     // set the directions
     pinMode (RESET, OUTPUT); //Slave Select
@@ -846,10 +844,10 @@ void loop()
 
     if (!tb.connected()) {
         // Connect to the ThingsBoard
-        Serial.print("Connecting to: ");
-        Serial.print(THINGSBOARD_SERVER);
-        Serial.print(" with token ");
-        Serial.println(TOKEN);
+        // Serial.print("Connecting to: ");
+        // Serial.print(THINGSBOARD_SERVER);
+        // Serial.print(" with token ");
+        // Serial.println(TOKEN);
         if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
             Serial.println("Failed to connect");
             return;
@@ -938,14 +936,16 @@ void loop()
                 Serial.print("Pulse rate :");
                 Serial.println(n_heart_rate);
                 tb.sendTelemetryData("SpO2", n_spo2);
-
                 tb.sendTelemetryData("Pulse rate", n_heart_rate);
             }
             n_buffer_count = 0;
         }
         else{
-          Serial.println(n_buffer_count);
+            if (n_buffer_count == 99){
+                Serial.print("almost");
+            }
         }
+
         afe44xx_data_ready = false;
         drdy_trigger = LOW;
         attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
