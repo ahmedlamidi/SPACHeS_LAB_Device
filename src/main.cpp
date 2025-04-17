@@ -134,8 +134,18 @@ void processTelemetry(){
     deserializeJson(doc, payload);
     size_t json_size = measureJson(doc);
     Serial.println(tb.connected());
+    if (!tb.connected()) {
+        Serial.println("Reconnecting to ThingsBoard...");
+        if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
+            Serial.println("Failed to connect to ThingsBoard!");
+            return;
+        }
+        else{
+            Serial.println("Not connected");
+        }
+    }
     bool result = tb.sendTelemetryJson(doc, json_size);
-    Serial.println("Got data");
+    Serial.println(result);
   }
 }
 
@@ -192,12 +202,15 @@ void loop() {
     Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
     processTelemetry();
     // Ensure MQTT Connection
-    if (!tb.connected()) {
-        Serial.println("Reconnecting to ThingsBoard...");
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
-            Serial.println("Failed to connect to ThingsBoard!");
-            return;
-        }
-    }
+    // if (!tb.connected()) {
+    //     Serial.println("Reconnecting to ThingsBoard...");
+    //     if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
+    //         Serial.println("Failed to connect to ThingsBoard!");
+    //         return;
+    //     }
+    //     else{
+    //         Serial.println("Not connected");
+    //     }
+    // }
     tb.loop(); // Maintain MQTT connection
 }
