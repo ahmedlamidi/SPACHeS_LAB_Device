@@ -156,15 +156,15 @@ unsigned long start_time;
 unsigned long end_time;
 
 //Pin declarations
-const int SPISTE = 15;  // chip select - IO15
+const int SPISTE = 10;  // chip select - IO15
 const int SPIDRDY = 4;  // data ready pin - IO4
 volatile int drdy_trigger = LOW;
 const int RESET = 0; // reset pin - IO0
 const int PWDN = 2; // powerdown pin - IO2
-#define GRN_LED 27          //TBD after soldering
-#define RED_LED 26          //TBD after soldering
-#define BATTERY_IN 39
-#define CHARGER 18
+#define GRN_LED 47          //TBD after soldering
+#define RED_LED 48          //TBD after soldering
+#define BATTERY_IN 6
+#define CHARGER 16
 
 void afe44xxInit (void);
 void afe44xxWrite (uint8_t address, uint32_t data);
@@ -252,23 +252,32 @@ void setup()
 
 
     //LED and battery read pins
+    Serial.println("here");
     pinMode(GRN_LED, OUTPUT);
+    Serial.println("here");
     pinMode(RED_LED, OUTPUT);
+    Serial.println("here");
     pinMode(BATTERY_IN, INPUT);
+    Serial.println("here");
     pinMode(CHARGER,OUTPUT);
+    Serial.println("here");
     digitalWrite(RED_LED, HIGH);
     // Enable saved past credential by autoReconnect option,
     // even once it is disconnected.
+    Serial.println("here");
     Config.apid = "SpO2ap";
     Config.apip =  IPAddress(192,168,10,101);
+    Serial.println("here");
     Config.autoReconnect = false;
     Config.retainPortal = true;
     Config.autoRise = true;
+    Serial.println("here");
     //Config.preserveAPMode = true;
     Config.immediateStart = true;
     Config.hostName = "esp32-01";
     Portal.config(Config);
     Server.on("/", rootPage);
+    Serial.println("here");
     // Establish a connection with an autoReconnect option.
     Serial.println("Setup complete");
     delay(100);
@@ -276,28 +285,25 @@ void setup()
         Serial.println("WiFi connected: " + WiFi.localIP().toString());
         Serial.println(WiFi.getHostname());
     }
+    Serial.println("here");
     timeClient.begin();
     timeClient.update();
     start_epoch_time = timeClient.getEpochTime();
     start_milli_time = millis();
     Serial.println("Setup complete - 2");
-  delay(100);
     //set up for data saving
     Serial.println("CLEARDATA");
     Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
     Serial.println("RESETTIMER");
     tb.setBufferSize(256);
 
-
-    Serial.println("Intilazition AFE44xx.. ");
-    delay(2000) ;   // pause for a moment
-
     analogReadResolution(12);
-    //SPI.begin();
    
     #define Dum1     9 
     #define Dum2      14
     #define Dum3      15
+
+
 
     pinMode(Dum1, INPUT);
     pinMode(Dum2, INPUT);
@@ -385,7 +391,7 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 
     size_t json_size = measureJson(doc); // Get the size of the JsonDocument
     bool result = tb.sendTelemetryJson(doc, json_size);
-    Serial.println(result);
+    // Serial.println(result);
 
 
     //save data for PLX-DAQ serial monitor
@@ -416,9 +422,9 @@ void printArray(int32_t  *arr, char *name, int32_t size_n) {
     Serial.print(name);
     Serial.print( " = [");
     for (size_t i = 0; i < size_n; ++i) {
-        Serial.print(arr[i]);
+        // Serial.print(arr[i]);
         if (i < size_n - 1) {
-            Serial.print(", ");
+            // Serial.print(", ");
         }
     }
     Serial.println( "]");
@@ -921,22 +927,24 @@ void loop()
             if (n_spo2 == -999){
                 Serial.println("Probe error!!!!");
                 tb.sendTelemetryData("SpO2", n_spo2);
-
                 tb.sendTelemetryData("Pulse rate", n_heart_rate);
             }
             else
             {
 
-                // Serial.print(" Sp02 : ");
-                // Serial.print(n_spo2);
-                // Serial.print("% ,");
-                // Serial.print("Pulse rate :");
-                // Serial.println(n_heart_rate);
+                Serial.print(" Sp02 : ");
+                Serial.print(n_spo2);
+                Serial.print("% ,");
+                Serial.print("Pulse rate :");
+                Serial.println(n_heart_rate);
                 tb.sendTelemetryData("SpO2", n_spo2);
 
                 tb.sendTelemetryData("Pulse rate", n_heart_rate);
             }
             n_buffer_count = 0;
+        }
+        else{
+          Serial.println(n_buffer_count);
         }
         afe44xx_data_ready = false;
         drdy_trigger = LOW;
