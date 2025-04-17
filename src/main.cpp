@@ -967,7 +967,6 @@ void loop()
             time_stamps[n_buffer_count] = millis();
             //send data to Thingsboard
             getAndSendPPG(n_buffer_count, time_stamps[n_buffer_count]);
-            delay(2000);
             n_buffer_count++;
             dec = 0;
 
@@ -978,6 +977,7 @@ void loop()
         {
             // Serial.println("xasdasdx!!!");
             estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
+            delay(100);
             // if (n_spo2 == -999){
             //     Serial.println("Probe error!!!!");
             //     tb.sendTelemetryData("SpO2", n_spo2);
