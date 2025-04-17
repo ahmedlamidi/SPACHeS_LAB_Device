@@ -270,7 +270,8 @@ void setup()
     Portal.config(Config);
     Server.on("/", rootPage);
     // Establish a connection with an autoReconnect option.
-
+    Serial.println("Setup complete");
+    delay(100);
     if (Portal.begin()) {
         Serial.println("WiFi connected: " + WiFi.localIP().toString());
         Serial.println(WiFi.getHostname());
@@ -279,7 +280,8 @@ void setup()
     timeClient.update();
     start_epoch_time = timeClient.getEpochTime();
     start_milli_time = millis();
-
+    Serial.println("Setup complete - 2");
+  delay(100);
     //set up for data saving
     Serial.println("CLEARDATA");
     Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
@@ -292,8 +294,21 @@ void setup()
 
     analogReadResolution(12);
     //SPI.begin();
-    SPI.begin(14,12,13,15); // these are pin numbers for SPI
+   
+    #define Dum1     9 
+    #define Dum2      14
+    #define Dum3      15
 
+    pinMode(Dum1, INPUT);
+    pinMode(Dum2, INPUT);
+    pinMode(Dum3, INPUT);
+
+    //SPI.begin();
+    #define SCK 12
+    #define MISO 13
+    #define MOSI 11
+    #define CS 10
+    SPI.begin(SCK, MISO, MOSI, CS); // these are pin numbers for SPI
     // set the directions
     pinMode (RESET, OUTPUT); //Slave Select
     pinMode (PWDN, OUTPUT); //Slave Select
@@ -318,8 +333,8 @@ void setup()
     //   attachInterrupt(0, afe44xx_drdy_event, RISING );
     // set SPI transmission
     SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
-    //SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
-    SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
+    SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
+    // SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
     SPI.setBitOrder (MSBFIRST);           //MSB first
 
     // Packet structure
