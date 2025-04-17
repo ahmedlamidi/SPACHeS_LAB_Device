@@ -53,7 +53,8 @@
 // constexpr uint16_t THINGSBOARD_PORT = 1883U;
 
 // REPLACE WITH YOUR RECEIVER MAC Address
-uint8_t broadcastAddress[] = {0x34, 0xCD, 0xB0, 0x06, 0x67, 0x60};
+uint8_t broadcastAddress[] = {0x98, 0xCD, 0xAC, 0x88, 0x12, 0x1C};
+//98:CD:AC:88:12:1C
 
 
 
@@ -339,8 +340,25 @@ void setup()
     delay(2000) ;   // pause for a moment
 
     analogReadResolution(12);
+
+    #define Dum1     9 
+    #define Dum2      14
+    #define Dum3      15
+
+    pinMode(Dum1, INPUT);
+    pinMode(Dum2, INPUT);
+    pinMode(Dum3, INPUT);
+
     //SPI.begin();
-    SPI.begin(14,12,13,15); // these are pin numbers for SPI
+    #define SCK 12
+    #define MISO 13
+    #define MOSI 11
+    #define CS 10
+    SPI.begin(SCK, MISO, MOSI, CS); // these are pin numbers for SPI
+    // Changed
+
+
+
 
     // set the directions
     pinMode (RESET, OUTPUT); //Slave Select
@@ -366,8 +384,8 @@ void setup()
     //   attachInterrupt(0, afe44xx_drdy_event, RISING );
     // set SPI transmission
     SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
-    //SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
-    SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
+    SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
+    // SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
     SPI.setBitOrder (MSBFIRST);           //MSB first
 
     // Packet structure
