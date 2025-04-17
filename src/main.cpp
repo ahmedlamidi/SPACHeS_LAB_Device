@@ -141,23 +141,6 @@ void processTelemetry(){
 void setup() {
     Serial.begin(115200);
 
-    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-      if (event == SYSTEM_EVENT_STA_DISCONNECTED) {
-        Serial.println("Wi-Fi disconnected");
-        esp_now_deinit();
-      } 
-      else if (event == SYSTEM_EVENT_STA_GOT_IP) {
-        Serial.println("Wi-Fi connected with IP");
-        esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
-  
-        if (esp_now_init() != ESP_OK) {
-          Serial.println("ESP-NOW re-init failed");
-          return;
-        }
-  
-        // Re-add your peers here
-      }
-    });
 
     WiFi.mode(WIFI_STA);
     // Configure AutoConnect
@@ -182,9 +165,11 @@ void setup() {
         timeClient.update();
         start_epoch_time = timeClient.getEpochTime();
         int channel = WiFi.channel();
+        Serial.println(channel); // see what channels
         esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);  // 🔧 Force channel lock
 
         if (WiFi.status() == WL_CONNECTED) {
+        esp_wifi_set_ps(WIFI_PS_NONE); // turn off power saving
           if (esp_now_init() != ESP_OK) {
             Serial.println("ESP-NOW init failed");
             return;
@@ -199,28 +184,13 @@ void setup() {
         Serial.println("Failed to connect to WiFi.");
     }
 }
-bool wasDisconnected;
+
 
 
 void loop() {
     Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
     processTelemetry();
     // Ensure MQTT Connection
-
-    if (WiFi.status() != WL_CONNECTED) {
-      wasDisconnected = true;
-    } else if (wasDisconnected) {
-      Serial.println("Reconnected to WiFi. Reinitializing ESP-NOW...");
-      wasDisconnected = false;
-  
-      esp_now_deinit(); // Clean up first
-      if (esp_now_init() == ESP_OK) {
-        esp_now_register_recv_cb(OnDataRecv);
-        Serial.println("ESP-NOW reinitialized after WiFi reconnect");
-      } else {
-        Serial.println("Failed to reinit ESP-NOW");
-      }
-    }
 
     if (!tb.connected()) {
         Serial.println("Reconnecting to ThingsBoard...");
