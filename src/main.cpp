@@ -314,6 +314,7 @@ void setup()
 
 
     WiFi.mode(WIFI_STA);
+    esp_wifi_set_channel(6, WIFI_SECOND_CHAN_NONE); // change to match receiver channel
 
     if (esp_now_init() != ESP_OK) {
         Serial.println("Error initializing ESP-NOW");
