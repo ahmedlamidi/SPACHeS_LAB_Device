@@ -131,7 +131,7 @@ void processTelemetry(){
     Serial.println(payload); // For debug
 
     // Send to ThingsBoard
-    DynamicJsonDocument doc(512);
+    DynamicJsonDocument doc(1500);
     deserializeJson(doc, payload);
     size_t json_size = measureJson(doc);
     Serial.println(tb.connected());
