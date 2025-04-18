@@ -109,10 +109,11 @@ void processTelemetry(){
   while (dequeue(data)) {
     if (start_milli_time == 0) {
       start_milli_time = data.start_milli_time;
+      start_epoch_time = timeClient.getEpochTime();
     }
 
     unsigned long long delta = data.start_milli_time - start_milli_time;
-    unsigned long long actual_time_stamp = (start_epoch_time * 1000ULL) + delta;
+    unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta;
 
     String payload = "{";
     payload += "\"ts\": ";
@@ -127,7 +128,7 @@ void processTelemetry(){
     payload += "\"Pulse rate\":"; payload += data.n_heart_rate;
     payload += "}}";
 
-    // Serial.println(payload); // For debug
+    Serial.println(payload); // For debug
 
     // Send to ThingsBoard
     DynamicJsonDocument doc(512);
@@ -141,11 +142,10 @@ void processTelemetry(){
             return;
         }
         else{
-            Serial.println("Not connected");
+            bool result = tb.sendTelemetryJson(doc, json_size);
+            Serial.println(result);
         }
     }
-    bool result = tb.sendTelemetryJson(doc, json_size);
-    Serial.println(result);
   }
 }
 
@@ -174,7 +174,6 @@ void setup() {
 
         timeClient.begin();
         timeClient.update();
-        start_epoch_time = timeClient.getEpochTime();
         int channel = WiFi.channel();
         Serial.println(channel); // see what channels
         esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);  // 🔧 Force channel lock
