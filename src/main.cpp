@@ -113,8 +113,8 @@ void processTelemetry(){
     }
 
     unsigned long long delta = data.start_milli_time - start_milli_time;
-    unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta;
-    Serial.println(actual_time_stamp);
+    unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta + 1000;
+    Serial.println(start_epoch_time);
     Serial.println(delta);
 
 
@@ -147,7 +147,13 @@ void processTelemetry(){
         else{
             bool result = tb.sendTelemetryJson(doc, json_size);
             Serial.println(result);
+            delay(50);
         }
+    }
+    else{
+      bool result = tb.sendTelemetryJson(doc, json_size);
+            Serial.println(result);
+            delay(100);
     }
   }
 }
