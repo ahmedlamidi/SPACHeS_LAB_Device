@@ -114,6 +114,9 @@ void processTelemetry(){
 
     unsigned long long delta = data.start_milli_time - start_milli_time;
     unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta;
+    Serial.println(actual_time_stamp);
+    Serial.println(delta);
+
 
     String payload = "{";
     payload += "\"ts\": ";
