@@ -107,7 +107,7 @@ void processTelemetry(){
 
   TelemetryData data;
   while (dequeue(data)) {
-    if (start_milli_time == 0) {
+    if (start_milli_time == 0 || data.start_milli_time < start_milli_time) {
       start_milli_time = data.start_milli_time;
       start_epoch_time = timeClient.getEpochTime();
     }
