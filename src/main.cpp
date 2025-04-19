@@ -107,13 +107,14 @@ void processTelemetry(){
 
   TelemetryData data;
   while (dequeue(data)) {
-    if (start_milli_time == 0 || data.start_milli_time < start_milli_time) {
+    if (start_milli_time == 0) {
       start_milli_time = data.start_milli_time;
+      timeClient.update();
       start_epoch_time = timeClient.getEpochTime();
     }
-
     unsigned long long delta = data.start_milli_time - start_milli_time;
-    unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta + 1000;
+    unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta;
+    // unsigned long long actual_time_stamp = (start_epoch_time * 1000) + millis();
     Serial.println(start_epoch_time);
     Serial.println(delta);
 
