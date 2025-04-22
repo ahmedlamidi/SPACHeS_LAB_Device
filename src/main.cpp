@@ -259,8 +259,8 @@ esp_now_peer_info_t peerInfo;
 
 // callback when data is sent
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("\r\nLast Packet Send Status:\t");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  // Serial.print("\r\nLast Packet Send Status:\t");
+  // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
 ///////// Gets Fired on DRDY event/////////////////////////////
@@ -315,7 +315,7 @@ void setup()
 
 
     WiFi.mode(WIFI_STA);
-    esp_wifi_set_channel(6, WIFI_SECOND_CHAN_NONE); // change to match receiver channel
+    esp_wifi_set_channel(11, WIFI_SECOND_CHAN_NONE); // change to match receiver channel
 
     if (esp_now_init() != ESP_OK) {
         Serial.println("Error initializing ESP-NOW");
@@ -977,7 +977,7 @@ void loop()
         {
             // Serial.println("xasdasdx!!!");
             estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
-            delay(100);
+           
             // if (n_spo2 == -999){
             //     Serial.println("Probe error!!!!");
             //     tb.sendTelemetryData("SpO2", n_spo2);
