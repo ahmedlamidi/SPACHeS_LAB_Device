@@ -41,7 +41,7 @@ ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 
 
 
-#define QUEUE_SIZE 100
+#define QUEUE_SIZE 200
 
 struct TelemetryData {
   int32_t n_spo2;  //SPO2 value
