@@ -236,6 +236,12 @@ unsigned long start_milli_time;
 unsigned long real_time;
 int ii = 0;
 
+
+int state = 0; // state 0 is not yet starting
+              // starte 1 is sending data
+
+int wifi_channel;
+
 // void rootPage(){
 //     char content[] = "ESP32 Autoconnect Setup";
 //     Server.send(200, "text/plain", content); // send the content to the server
@@ -261,6 +267,12 @@ esp_now_peer_info_t peerInfo;
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   // Serial.print("\r\nLast Packet Send Status:\t");
   // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
+
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len){
+  memcpy(&wifi_channel, incomingData, sizeof(int));
+  
 }
 
 ///////// Gets Fired on DRDY event/////////////////////////////
@@ -315,7 +327,7 @@ void setup()
 
 
     WiFi.mode(WIFI_STA);
-    esp_wifi_set_channel(11, WIFI_SECOND_CHAN_NONE); // change to match receiver channel
+    esp_wifi_set_channel(6, WIFI_SECOND_CHAN_NONE); // change to match receiver channel
 
     if (esp_now_init() != ESP_OK) {
         Serial.println("Error initializing ESP-NOW");
