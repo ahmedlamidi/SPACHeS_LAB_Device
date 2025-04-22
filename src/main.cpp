@@ -67,7 +67,7 @@ bool isQueueEmpty() {
 }
 
 bool enqueue(const TelemetryData& data) {
-  if (isQueueFull()) {Serial.println("full");return false};
+  if (isQueueFull()) {Serial.println("full");return false;}
   telemetryQueue[queueHead] = data;
   queueHead = (queueHead + 1) % QUEUE_SIZE;
   return true;
