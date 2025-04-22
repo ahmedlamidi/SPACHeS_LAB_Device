@@ -41,7 +41,7 @@ ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 
 
 
-#define QUEUE_SIZE 20
+#define QUEUE_SIZE 100
 
 struct TelemetryData {
   int32_t n_spo2;  //SPO2 value
@@ -67,7 +67,7 @@ bool isQueueEmpty() {
 }
 
 bool enqueue(const TelemetryData& data) {
-  if (isQueueFull()) return false;
+  if (isQueueFull()) {Serial.println("full");return false};
   telemetryQueue[queueHead] = data;
   queueHead = (queueHead + 1) % QUEUE_SIZE;
   return true;
