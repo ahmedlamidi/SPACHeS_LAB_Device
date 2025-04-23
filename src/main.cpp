@@ -240,7 +240,9 @@ int ii = 0;
 int state = 0; // state 0 is not yet starting
               // starte 1 is sending data
 
-int wifi_channel;
+
+int wifi_channels[2] = {6, 11};
+int index = 0;
 
 // void rootPage(){
 //     char content[] = "ESP32 Autoconnect Setup";
@@ -271,8 +273,8 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 
 
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len){
-  memcpy(&wifi_channel, incomingData, sizeof(int));
-  
+    state = 1;
+    Serial.println("Connected to ESP Now");
 }
 
 ///////// Gets Fired on DRDY event/////////////////////////////
@@ -325,28 +327,30 @@ void setup()
     // Serial.println("RESETTIMER");
     // tb.setBufferSize(256);
 
+    while(state == 0){
+        WiFi.mode(WIFI_STA);
+        index = 1 - index;
+        esp_wifi_set_channel(wifi_channels[index], WIFI_SECOND_CHAN_NONE); // change to match receiver channel
 
-    WiFi.mode(WIFI_STA);
-    esp_wifi_set_channel(6, WIFI_SECOND_CHAN_NONE); // change to match receiver channel
+        if (esp_now_init() != ESP_OK) {
+            Serial.println("Error initializing ESP-NOW");
+            return;
+        }
 
-    if (esp_now_init() != ESP_OK) {
-        Serial.println("Error initializing ESP-NOW");
-        return;
+        esp_now_register_recv_cb((OnDataRecv));
+
+        // Register peer
+        memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+        peerInfo.channel = 0;  
+        peerInfo.encrypt = false;
+
+        if (esp_now_add_peer(&peerInfo) != ESP_OK){
+            Serial.println("Failed to add peer");
+            return;
+        }
+        delay(500);
     }
-
     esp_now_register_send_cb(OnDataSent);
-
-     // Register peer
-    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-    peerInfo.channel = 0;  
-    peerInfo.encrypt = false;
-
-    if (esp_now_add_peer(&peerInfo) != ESP_OK){
-        Serial.println("Failed to add peer");
-        return;
-    }
-
-
 
 
     Serial.println("Intilazition AFE44xx.. ");
