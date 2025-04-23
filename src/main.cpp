@@ -241,8 +241,8 @@ int state = 0; // state 0 is not yet starting
               // starte 1 is sending data
 
 
-int wifi_channels[2] = {6, 11};
-int index = 0;
+uint8_t wifi_channels[2] = {6, 11};
+int selected_channel = 0;
 
 // void rootPage(){
 //     char content[] = "ESP32 Autoconnect Setup";
@@ -329,8 +329,8 @@ void setup()
 
     while(state == 0){
         WiFi.mode(WIFI_STA);
-        index = 1 - index;
-        esp_wifi_set_channel(wifi_channels[index], WIFI_SECOND_CHAN_NONE); // change to match receiver channel
+        selected_channel -= 1;
+        esp_wifi_set_channel(wifi_channels[selected_channel], WIFI_SECOND_CHAN_NONE); // change to match receiver channel
 
         if (esp_now_init() != ESP_OK) {
             Serial.println("Error initializing ESP-NOW");
