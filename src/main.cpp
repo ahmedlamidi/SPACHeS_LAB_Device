@@ -21,7 +21,7 @@ NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 uint8_t broadcastAddress[] = {0x98, 0xCD, 0xAC, 0x88, 0x12, 0x1C};
 
 
-int current_state = 0;
+int current_state = 1;
 
 // Structure example to receive data
 // Must match the sender structure
@@ -196,6 +196,8 @@ void setup() {
             return;
           }
           esp_now_register_recv_cb((OnDataRecv));
+
+          current_state = 0;
         }
         memcpy(peerInfo.peer_addr, broadcastAddress, 6);
         peerInfo.channel = 0;  
@@ -217,8 +219,9 @@ void setup() {
 
 
 void loop() {
-    if(current_state == 0){
-        esp_now_send(broadcastAddress, (uint8_t *) 1, sizeof(int));
+    if(current_state == 0){ 
+        int data = 1;
+        esp_now_send(broadcastAddress, (uint8_t *)&data, sizeof(data));
     }
 
     Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
