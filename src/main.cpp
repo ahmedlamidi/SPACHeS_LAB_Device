@@ -244,6 +244,8 @@ int state = 0; // state 0 is not yet starting
 uint8_t wifi_channels[2] = {6, 11};
 int selected_channel = 0;
 
+
+
 // void rootPage(){
 //     char content[] = "ESP32 Autoconnect Setup";
 //     Server.send(200, "text/plain", content); // send the content to the server
@@ -254,7 +256,7 @@ typedef struct Data {
     int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
     int32_t n_heart_rate; //heart rate value
     int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
-    unsigned long start_milli_time;
+    unsigned long long measurement_time;
     uint16_t PPG_R;
     uint16_t PPG_IR;
 
@@ -274,6 +276,8 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len){
     state = 1;
+    memcpy(&start_epoch_time, incomingData, sizeof(start_epoch_time));
+    start_milli_time = millis();
     Serial.println("Connected to ESP Now");
 }
 
@@ -331,25 +335,27 @@ void setup()
         WiFi.mode(WIFI_STA);
         selected_channel -= 1;
         esp_wifi_set_channel(wifi_channels[selected_channel], WIFI_SECOND_CHAN_NONE); // change to match receiver channel
-
+        esp_now_deinit(); 
         if (esp_now_init() != ESP_OK) {
             Serial.println("Error initializing ESP-NOW");
             return;
         }
 
-        esp_now_register_recv_cb((OnDataRecv));
-
+        esp_now_register_recv_cb((OnDataRecv)); 
         // Register peer
-        memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-        peerInfo.channel = 0;  
-        peerInfo.encrypt = false;
-
-        if (esp_now_add_peer(&peerInfo) != ESP_OK){
-            Serial.println("Failed to add peer");
-            return;
-        }
-        delay(500);
+        Serial.print("Tried to use channel: ");
+        Serial.println(wifi_channels[selected_channel]);
     }
+
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;  
+    peerInfo.encrypt = false;
+
+    if (esp_now_add_peer(&peerInfo) != ESP_OK){
+        Serial.println("Failed to add peer");
+        return;
+    }
+    delay(500);
     esp_now_register_send_cb(OnDataSent);
 
 
@@ -423,7 +429,7 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 
     Data.PPG_IR = aun_ir_buffer[n_buffer_count];
     Data.PPG_R = aun_red_buffer[n_buffer_count];
-    Data.start_milli_time = millis();
+    Data.measurement_time = (start_epoch_time  * 1000)+ (millis() - start_milli_time);
 
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &Data, sizeof(Data));
    
@@ -933,7 +939,7 @@ void loop()
     if(voltage > 4.1) digitalWrite(CHARGER, LOW);
     if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
 
-    // To make the battery ot work
+    // To make the battery ot workl
     // digitalWrite(CHARGER, LOW);
 
     if(percentage < 33){
