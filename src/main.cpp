@@ -9,9 +9,6 @@
 #include <Arduino_MQTT_Client.h>
 #include <ThingsBoard.h>
 
-// #include <BLEDevice.h>
-// #include <BLEScan.h>
-// #include <BLEAdvertisedDevice.h>
 
 
 //NTP library to get real time from server
@@ -20,6 +17,11 @@
 #define NTP_ADDRESS  "pool.ntp.org"
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
+
+uint8_t broadcastAddress[] = {0x98, 0xCD, 0xAC, 0x88, 0x12, 0x1C};
+
+
+int current_state = 0;
 
 // Structure example to receive data
 // Must match the sender structure
@@ -39,6 +41,7 @@ Arduino_MQTT_Client mqttClient(espClient);
 ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 
 
+esp_now_peer_info_t peerInfo;
 
 
 #define QUEUE_SIZE 200
@@ -86,6 +89,7 @@ TelemetryData myData;
 
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+    current_state = 1;
   memcpy(&myData, incomingData, sizeof(TelemetryData));
   enqueue(myData); // Add to queue
 
@@ -183,7 +187,7 @@ void setup() {
         timeClient.update();
         int channel = WiFi.channel();
         Serial.println(channel); // see what channels
-        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);  // 🔧 Force channel lock
+        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);  // channel lock
 
         if (WiFi.status() == WL_CONNECTED) {
         esp_wifi_set_ps(WIFI_PS_NONE); // turn off power saving
@@ -192,6 +196,14 @@ void setup() {
             return;
           }
           esp_now_register_recv_cb((OnDataRecv));
+        }
+        memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+        peerInfo.channel = 0;  
+        peerInfo.encrypt = false;
+
+        if (esp_now_add_peer(&peerInfo) != ESP_OK){
+            Serial.println("Failed to add peer");
+            return;
         }
         // WiFi.mode(WIFI_STA);
       // Init ESP-NOW
@@ -205,6 +217,10 @@ void setup() {
 
 
 void loop() {
+    if(current_state == 0){
+        esp_now_send(broadcastAddress, (uint8_t *) 1, sizeof(int));
+    }
+
     Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
     processTelemetry();
     tb.loop(); // Maintain MQTT connection
