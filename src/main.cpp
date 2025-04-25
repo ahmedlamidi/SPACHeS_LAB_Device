@@ -85,6 +85,7 @@ float percentage = 0.0f;
 int battStatus = 5; //Start in default mode (not transmitting)
 int ledState = LOW;   // ledState used to set the LED
 int failure_count = 0;
+esp_now_peer_info_t peerInfo;
 
 //afe44xx Register definition
 #define CONTROL0    0x00
@@ -265,16 +266,15 @@ struct Message {
   Command cmd;
   union {
     uint64_t timestamp;
-    TelemetryData telemetry[12];
+    TelemetryData telemetry[6];
   } payload;
 };
 
 enum SenderState {SYNCING, TRANSMITTING, WAITING};
 SenderState current_state = SYNCING;
 
-esp_now_peer_info_t peerInfo;
 
-TelemetryData sendBuffer[12];
+TelemetryData sendBuffer[6];
 int bufferIndex = 0;
 
 
@@ -303,7 +303,9 @@ void flushBuffer() {
     if(bufferIndex == 0) return;
     Message msg = {.cmd = DATA};
     memcpy(msg.payload.telemetry, sendBuffer, bufferIndex * sizeof(TelemetryData));
-    esp_now_send(receiverAddress, (uint8_t*)&msg, sizeof(Command) + bufferIndex * sizeof(TelemetryData));
+    Serial.print("2: ");
+    Serial.println(sizeof(msg));
+    esp_now_send(receiverAddress, (uint8_t*)&msg, sizeof(msg));
     bufferIndex = 0;
   }
   
@@ -311,9 +313,11 @@ void flushBuffer() {
 
 void transmitData() {
     sendBuffer[bufferIndex++] = getCurrentTelemetry();
-    if(bufferIndex == 12) {
+    if(bufferIndex == 6) {
       Message msg = {.cmd = DATA};
       memcpy(msg.payload.telemetry, sendBuffer, sizeof(sendBuffer));
+      Serial.print("1: ");
+      Serial.println(sizeof(msg));
       esp_now_send(receiverAddress, (uint8_t*)&msg, sizeof(msg));
       bufferIndex = 0;
     }
@@ -326,25 +330,25 @@ sendBuffer[bufferIndex++] = getCurrentTelemetry();
 
 // callback when data is sent
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-  Message *msg;
-  memcpy(msg, incomingData, sizeof(Message));
-  switch(msg->cmd) {
-    case SYNC_TIME:
-      start_epoch_time = msg->payload.timestamp;
-      start_milli_time = millis();
-      current_state = TRANSMITTING;
-      break;
-    case WAIT:
-      current_state = WAITING;
-      break;
-    case READY:
-      current_state = TRANSMITTING;
-      flushBuffer();
-      break;
-    default: break;
+  Message msg;
+  memcpy(&msg, incomingData, len);
+  
+  if (msg.cmd == SYNC_TIME) {
+    start_epoch_time = msg.payload.timestamp;
+    start_milli_time = millis();
+    current_state = TRANSMITTING;
+    Serial.println("SYNC_TIME received. Now TRANSMITTING.");
+  }
+  else if (msg.cmd == WAIT) {
+    current_state = WAITING;
+    Serial.println("WAIT received. Now WAITING.");
+  }
+  else if (msg.cmd == READY) {
+    current_state = TRANSMITTING;
+    flushBuffer();
+    Serial.println("READY received. Resuming TRANSMITTING.");
   }
 }
-
 
 
 
@@ -355,82 +359,92 @@ ICACHE_RAM_ATTR void afe44xx_drdy_event()
 }
 
 
-void setup()
-{
-    Serial.begin(115200);
-    // Serial.begin(57600);
-    //Serial.begin(9600);
-    //InitWiFi();
+void setup() {
+  Serial.begin(115200);
 
+  // --- LED and Battery Pin Initialization ---
+  pinMode(GRN_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(BATTERY_IN, INPUT);
+  pinMode(CHARGER, OUTPUT);
+  digitalWrite(RED_LED, HIGH);
 
-    //LED and battery read pins
-    pinMode(GRN_LED, OUTPUT);
-    pinMode(RED_LED, OUTPUT);
-    pinMode(BATTERY_IN, INPUT);
-    pinMode(CHARGER,OUTPUT);
-    digitalWrite(RED_LED, HIGH);
+  // --- Wi-Fi and ESP-NOW Initialization ---
+  WiFi.mode(WIFI_STA);
 
-    Serial.begin(115200);
-    WiFi.mode(WIFI_STA);
-    esp_now_init();
-    esp_now_register_recv_cb(OnDataRecv);
-  
-    esp_now_peer_info_t peerInfo;
-    memcpy(peerInfo.peer_addr, receiverAddress, 6);
-    peerInfo.channel = 0;
-    peerInfo.encrypt = false;
-    esp_now_add_peer(&peerInfo);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW initialization failed");
+    return;
+  }
+  esp_now_register_recv_cb(OnDataRecv);
 
-    delay(500);
+  // --- Correct ESP-NOW Peer Configuration ---
 
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, receiverAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  peerInfo.ifidx = WIFI_IF_STA;
 
-    Serial.println("Intilazition AFE44xx.. ");
-    delay(2000) ;   // pause for a moment
+  if (!esp_now_is_peer_exist(receiverAddress)) {
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+      Serial.println("Failed to add ESP-NOW peer");
+      return;
+    }
+  } else {
+    Serial.println("ESP-NOW peer already exists");
+  }
 
-    analogReadResolution(12);
-    //SPI.begin();
-    SPI.begin(14,12,13,15); // these are pin numbers for SPI
+  delay(500); // Wait briefly after peer setup
 
-    // set the directions
-    pinMode (RESET, OUTPUT); //Slave Select
-    pinMode (PWDN, OUTPUT); //Slave Select
+  // --- SPI Initialization for AFE44xx Sensor ---
+  Serial.println("Initializing AFE44xx...");
+  delay(2000);
 
-    digitalWrite(RESET, LOW);
-    delay(500);
-    digitalWrite(RESET, HIGH);
-    delay(500);
-    digitalWrite(PWDN, LOW);
-    delay(500);
-    digitalWrite(PWDN, HIGH);
-    delay(500);
-    pinMode (SPISTE, OUTPUT); //Slave Select
-    pinMode (SPIDRDY, INPUT); // data ready
-    //  Serial.println(SPISTE);
-    //  Serial.println(SS);
-    //  Serial.println(digitalRead(SPISTE));
-    //  Serial.println(digitalRead(SCK));
-    //  Serial.println(digitalRead(MOSI));
+  analogReadResolution(12);
 
-    attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING); // Digital2 is attached to Data ready pin of AFE is interrupt0 in ARduino
-    //   attachInterrupt(0, afe44xx_drdy_event, RISING );
-    // set SPI transmission
-    SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
-    //SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
-    SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
-    SPI.setBitOrder (MSBFIRST);           //MSB first
+  // SPI pins: SCLK (GPIO14), MISO (GPIO12), MOSI (GPIO13), CS (GPIO15)
+  SPI.begin(14, 12, 13, 15);
 
-    // Packet structure
-    DataPacketHeader[0] = CES_CMDIF_PKT_START_1;  //packet header1 0x0A
-    DataPacketHeader[1] = CES_CMDIF_PKT_START_2;  //packet header2 0xFA
-    DataPacketHeader[2] = datalen;                // data length 9
-    DataPacketHeader[3] = (uint8_t)(datalen >> 8);
-    DataPacketHeader[4] = CES_CMDIF_TYPE_DATA;
+  pinMode(RESET, OUTPUT);
+  pinMode(PWDN, OUTPUT);
+  pinMode(SPISTE, OUTPUT); // Chip select
+  pinMode(SPIDRDY, INPUT); // Data ready interrupt pin
 
-    DataPacketFooter[0] = 0x00;
-    DataPacketFooter[1] = CES_CMDIF_PKT_STOP;
-    afe44xxInit ();
-    Serial.println("initialization is done");
+  // Reset sequence for AFE44xx
+  digitalWrite(RESET, LOW);
+  delay(500);
+  digitalWrite(RESET, HIGH);
+  delay(500);
+  digitalWrite(PWDN, LOW);
+  delay(500);
+  digitalWrite(PWDN, HIGH);
+  delay(500);
+
+  // Attach interrupt to DRDY pin
+  attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING);
+
+  // SPI configuration
+  SPI.setClockDivider(SPI_CLOCK_DIV8); // SPI clock: 2 MHz
+  SPI.setDataMode(SPI_MODE1);          // SPI Mode 1
+  SPI.setBitOrder(MSBFIRST);           // MSB first transmission
+
+  // --- Data packet headers (for future serial communication, if needed) ---
+  DataPacketHeader[0] = CES_CMDIF_PKT_START_1;  // 0x0A
+  DataPacketHeader[1] = CES_CMDIF_PKT_START_2;  // 0xFA
+  DataPacketHeader[2] = datalen;                // Data length
+  DataPacketHeader[3] = (uint8_t)(datalen >> 8);
+  DataPacketHeader[4] = CES_CMDIF_TYPE_DATA;
+
+  DataPacketFooter[0] = 0x00;
+  DataPacketFooter[1] = CES_CMDIF_PKT_STOP;
+
+  // --- Sensor Initialization ---
+  afe44xxInit();
+
+  Serial.println("AFE44xx initialization complete.");
 }
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
@@ -1019,11 +1033,12 @@ void loop()
            
             n_buffer_count = 0;
         }
-        if (current_state == TRANSMITTING) transmitData();
-        else if (current_state == WAITING) bufferData();
+        if (current_state == TRANSMITTING) {transmitData(); Serial.println("Transmtting ");}
+        else if (current_state == WAITING) {bufferData(); Serial.println("Buffering ");}
+
         afe44xx_data_ready = false;
         drdy_trigger = LOW;
         attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
         // tb.loop();
     }
-}
+        }
