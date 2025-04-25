@@ -19,7 +19,7 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
 uint8_t broadcastAddress[] = {0x98, 0xCD, 0xAC, 0x88, 0x12, 0x1C};
-
+esp_now_peer_info_t peerInfo;
 
 #define MAX_BUFFERED_ROWS 20
 String csvBuffer = "";
@@ -42,7 +42,7 @@ Arduino_MQTT_Client mqttClient(espClient);
 ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 
 
-esp_now_peer_info_t peerInfo;
+
 
 
 #define QUEUE_SIZE 240
@@ -121,6 +121,7 @@ void broadcastTimestamp() {
   msg.cmd = SYNC_TIME;
   timeClient.update();
   msg.payload.timestamp = timeClient.getEpochTime();
+  p
   esp_now_send(broadcastAddress, (uint8_t*)&msg, sizeof(Command) + sizeof(uint64_t));
 }
 
@@ -154,19 +155,25 @@ void setup() {
   Config.channel = 6;
   Portal.config(Config);
   Server.on("/", rootPage);
+
   if(Portal.begin()){
     timeClient.begin();
     esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
-    esp_wifi_set_ps(WIFI_PS_NONE); 
-    esp_now_init();
-    esp_now_register_recv_cb(OnDataRecv);
+    if(WiFi.status() == WL_CONNECTED){
+      esp_wifi_set_ps(WIFI_PS_NONE); 
+      if (esp_now_init() != ESP_OK) {
+        Serial.println("ESP-NOW init failed");
+        return;
+      }
+      esp_now_register_recv_cb(OnDataRecv);
+  }
+    
   
-    esp_now_peer_info_t peerInfo;
 
     memcpy(peerInfo.peer_addr, broadcastAddress, 6);
     peerInfo.channel = 0;
     peerInfo.encrypt = false;
-    
+
     if (esp_now_add_peer(&peerInfo) != ESP_OK){
       Serial.println("Failed to add peer");
       return;
