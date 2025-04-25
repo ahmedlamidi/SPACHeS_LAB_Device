@@ -21,8 +21,9 @@ NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 uint8_t broadcastAddress[] = {0x98, 0xCD, 0xAC, 0x88, 0x12, 0x1C};
 
 
-int current_state = 1;
-
+#define MAX_BUFFERED_ROWS 20
+String csvBuffer = "";
+int bufferedCount = 0;
 // Structure example to receive data
 // Must match the sender structure
 
@@ -44,22 +45,37 @@ ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
 esp_now_peer_info_t peerInfo;
 
 
-#define QUEUE_SIZE 200
+#define QUEUE_SIZE 240
 
 struct TelemetryData {
   int32_t n_spo2;  //SPO2 value
   int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
   int32_t n_heart_rate; //heart rate value
   int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
-  unsigned long start_milli_time;
+  unsigned long long measurement_time;
   uint16_t PPG_R;
   uint16_t PPG_IR;
+};
+
+enum Command : uint8_t {SYNC_TIME, READY, WAIT, DATA};
+
+struct Message {
+  Command cmd;
+  union {
+    uint64_t timestamp;
+    TelemetryData telemetry[12];
+  } payload;
 };
 
 // Ring buffer
 TelemetryData telemetryQueue[QUEUE_SIZE];
 volatile int queueHead = 0;
 volatile int queueTail = 0;
+unsigned long lastDataReceived = 0;
+const unsigned long DATA_TIMEOUT_MS = 60000; // 60 sec
+
+
+int current_state = 0;
 
 bool isQueueFull() {
   return ((queueHead + 1) % QUEUE_SIZE) == queueTail;
@@ -87,14 +103,32 @@ bool dequeue(TelemetryData &data) {
 // Create a struct_message called myData
 TelemetryData myData;
 
-// callback function that will be executed when data is received
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-    current_state = 1;
-  memcpy(&myData, incomingData, sizeof(TelemetryData));
-  enqueue(myData); // Add to queue
 
-  // Get timestamp
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  Message *msg;
+  memcpy(msg, incomingData, sizeof(Message));
+  if (msg->cmd == DATA) {
+    for(int i=0; i < ((len - sizeof(Command))/sizeof(TelemetryData)); i++) {
+      enqueue(msg->payload.telemetry[i]);
+    }
+    current_state = 1;
+    lastDataReceived = millis();
+  }
 }
+
+void broadcastTimestamp() {
+  Message msg;
+  msg.cmd = SYNC_TIME;
+  timeClient.update();
+  msg.payload.timestamp = timeClient.getEpochTime();
+  esp_now_send(broadcastAddress, (uint8_t*)&msg, sizeof(Command) + sizeof(uint64_t));
+}
+
+void sendCommand(Command cmd) {
+  Message msg = {.cmd = cmd};
+  esp_now_send(broadcastAddress, (uint8_t*)&msg, sizeof(Command));
+}
+
 
 // Web Server and AutoConnect for Wi-Fi configuration
 WebServer Server;
@@ -105,126 +139,69 @@ void rootPage() {
     Server.send(200, "text/plain", "ESP32 AutoConnect Setup");
 }
 
-void processTelemetry(){
 
+void setup() {
+  Serial.begin(115200);
 
+  Config.apid = "SpO2ap";
+  Config.autoReconnect = true;
+  Portal.config(Config);
+  Portal.begin();
+  timeClient.begin();
 
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
+
+  esp_now_init();
+  esp_now_register_recv_cb(OnDataRecv);
+
+  esp_now_peer_info_t peerInfo;
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  esp_now_add_peer(&peerInfo);
+}
+
+void uploadTelemetry() {
   TelemetryData data;
   while (dequeue(data)) {
-    if (start_milli_time == 0) {
-      start_milli_time = data.start_milli_time;
-      timeClient.update();
-      start_epoch_time = timeClient.getEpochTime();
-    }
-    unsigned long long delta = data.start_milli_time - start_milli_time;
-    unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta;
-    // unsigned long long actual_time_stamp = (start_epoch_time * 1000) + millis();
-  
-
-
-    String payload = "{";
-    payload += "\"ts\": ";
-    char buffer[20];
-    sprintf(buffer, "%llu", actual_time_stamp);
-    payload += buffer;
-    payload += ",";
-    payload += "\"values\":{";
-    payload += "\"SPo2\":"; payload += data.n_spo2; payload += ",";
-    payload += "\"PPG_R\":"; payload += data.PPG_R; payload += ",";
-    payload += "\"PPG_IR\":"; payload += data.PPG_IR; payload += ",";
-    payload += "\"Pulse rate\":"; payload += data.n_heart_rate;
-    payload += "}}";
-
-    Serial.println(payload); // For debug
-
-    // Send to ThingsBoard
+    String payload = "{\"ts\":" + String(data.measurement_time) + ",\"values\":{\"SpO2\":" + data.n_spo2 + ",\"Pulse\":" + data.n_heart_rate + ",\"PPG_R\":" + data.PPG_R + ",\"PPG_IR\":" + data.PPG_IR + "}}";
     DynamicJsonDocument doc(1500);
-    deserializeJson(doc, payload);
-    size_t json_size = measureJson(doc);
-    Serial.println(tb.connected());
-    if (!tb.connected()) {
-        Serial.println("Reconnecting to ThingsBoard...");
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
-            Serial.println("Failed to connect to ThingsBoard!");
-            return;
+        deserializeJson(doc, payload);
+        size_t json_size = measureJson(doc);
+        Serial.println(tb.connected());
+        if (!tb.connected()) {
+            Serial.println("Reconnecting to ThingsBoard...");
+            if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
+                Serial.println("Failed to connect to ThingsBoard!");
+                return;
+            }
+            else{
+                bool result = tb.sendTelemetryJson(doc, json_size);
+                Serial.println(result);
+            }
         }
         else{
-            bool result = tb.sendTelemetryJson(doc, json_size);
-            Serial.println(result);
+          bool result = tb.sendTelemetryJson(doc, json_size);
+                Serial.println(result);
         }
-    }
-    else{
-      bool result = tb.sendTelemetryJson(doc, json_size);
-            Serial.println(result);
-    }
   }
 }
 
-void setup() {
-    Serial.begin(115200);
-
-
-    WiFi.mode(WIFI_STA);
-    // Configure AutoConnect
-    Config.apid = "SpO2ap";
-    Config.apip = IPAddress(192,168,10,101);
-    Config.autoReconnect = true;
-    Config.retainPortal = false;
-    Config.autoRise = true;
-    Config.immediateStart = true;
-    Config.hostName = "esp32-01";
-    Config.channel = 6;
-    Portal.config(Config);
-    Server.on("/", rootPage);
-
-    // Start Wi-Fi AutoConnect
-   
-    if (Portal.begin()) {
-        Serial.println("WiFi connected: " + WiFi.localIP().toString());
-
-
-        timeClient.begin();
-        timeClient.update();
-        int channel = WiFi.channel();
-        Serial.println(channel); // see what channels
-        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);  // channel lock
-
-        if (WiFi.status() == WL_CONNECTED) {
-        esp_wifi_set_ps(WIFI_PS_NONE); // turn off power saving
-          if (esp_now_init() != ESP_OK) {
-            Serial.println("ESP-NOW init failed");
-            return;
-          }
-          esp_now_register_recv_cb((OnDataRecv));
-
-          current_state = 0;
-        }
-        memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-        peerInfo.channel = 0;  
-        peerInfo.encrypt = false;
-
-        if (esp_now_add_peer(&peerInfo) != ESP_OK){
-            Serial.println("Failed to add peer");
-            return;
-        }
-        // WiFi.mode(WIFI_STA);
-      // Init ESP-NOW
-      // Once ESPNow is successfully Init, we will register for recv CB to
-      // get recv packer info
-    } else {
-        Serial.println("Failed to connect to WiFi.");
-    }
-}
-
-
-
 void loop() {
-    if(current_state == 0){ 
-        int data = 1;
-        esp_now_send(broadcastAddress, (uint8_t *)&data, sizeof(data));
-    }
+  Portal.handleClient();
+  tb.loop();
 
-    Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
-    processTelemetry();
-    tb.loop(); // Maintain MQTT connection
+  if (current_state == 1 && (millis() - lastDataReceived > DATA_TIMEOUT_MS)) {
+    current_state = 0;
+    Serial.println("Timeout. Broadcasting time...");
+  }
+
+  if (current_state == 0) broadcastTimestamp();
+
+  if ((queueHead - queueTail + QUEUE_SIZE) % QUEUE_SIZE >= 100) {
+    sendCommand(WAIT);
+    uploadTelemetry();
+    sendCommand(READY);
+  }
 }
