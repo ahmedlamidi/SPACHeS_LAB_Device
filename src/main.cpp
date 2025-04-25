@@ -278,7 +278,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len){
     state = 1;
     memcpy(&start_epoch_time, incomingData, sizeof(start_epoch_time));
     start_milli_time = millis();
-    Serial.println("Connected to ESP Now");
+    // Serial.println("Connected to ESP Now");
 }
 
 ///////// Gets Fired on DRDY event/////////////////////////////
@@ -333,7 +333,7 @@ void setup()
 
     while(state == 0){
         WiFi.mode(WIFI_STA);
-        selected_channel -= 1;
+        selected_channel  = 1 - selected_channel;
         esp_wifi_set_channel(wifi_channels[selected_channel], WIFI_SECOND_CHAN_NONE); // change to match receiver channel
         esp_now_deinit(); 
         if (esp_now_init() != ESP_OK) {
@@ -411,7 +411,7 @@ void setup()
 void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 {
     // Prepare a JSON payload string
-    time_stamp = ((start_epoch_time * 1000) + (real_time - start_milli_time));
+
     char PPG_data[1500];
 
     // String payload = "{";
@@ -430,11 +430,12 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     Data.PPG_IR = aun_ir_buffer[n_buffer_count];
     Data.PPG_R = aun_red_buffer[n_buffer_count];
     Data.measurement_time = (start_epoch_time  * 1000)+ (millis() - start_milli_time);
+    // Serial.println(Data.measurement_time);
 
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &Data, sizeof(Data));
    
     if (result == ESP_OK) {
-      Serial.println("Sent with success");
+    //   Serial.println("Sent with success");
     }
     else {
       Serial.println("Error sending the data");
@@ -710,11 +711,11 @@ void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_si
   \retval       None
 */
 {
-    printArray(pn_x, "Data Values", n_size);
+    // printArray(pn_x, "Data Values", n_size);
     find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
-    printArray(pn_locs, "Peaks Above", *n_npks);
+    // printArray(pn_locs, "Peaks Above", *n_npks);
     remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
-    printArray(pn_locs, "Peaks Remove Close", *n_npks);
+    // printArray(pn_locs, "Peaks Remove Close", *n_npks);
     *n_npks = min( *n_npks, n_max_num );
 }
 
