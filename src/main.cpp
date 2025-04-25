@@ -33,7 +33,6 @@
 #include <AutoConnect.h>
 #include <esp_now.h>
 
-
 // change path to spiffs and use deep
 // typo in autoconnect , wrongly uses the HTTPCLient instead of HttpClient -> make changes when compiling
 // Make changes in HTTPUpdate.h
@@ -53,7 +52,7 @@
 // constexpr uint16_t THINGSBOARD_PORT = 1883U;
 
 // REPLACE WITH YOUR RECEIVER MAC Address
-uint8_t broadcastAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x68, 0xA8};
+uint8_t receiverAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x68, 0xA8};
 // 34:CD:B0:08:68:A8
 
 
@@ -251,35 +250,103 @@ int selected_channel = 0;
 //     Server.send(200, "text/plain", content); // send the content to the server
 // }
 
-typedef struct Data {
-    int32_t n_spo2;  //SPO2 value
-    int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
-    int32_t n_heart_rate; //heart rate value
-    int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
-    unsigned long long measurement_time;
-    uint16_t PPG_R;
-    uint16_t PPG_IR;
+enum Command : uint8_t {SYNC_TIME, READY, WAIT, DATA};
+struct TelemetryData {
+  int32_t n_spo2;
+  int8_t ch_spo2_valid;
+  int32_t n_heart_rate;
+  int8_t ch_hr_valid;
+  unsigned long measurement_time;
+  uint16_t PPG_R;
+  uint16_t PPG_IR;
+};
 
-} message_information;
+struct Message {
+  Command cmd;
+  union {
+    uint64_t timestamp;
+    TelemetryData telemetry[12];
+  } payload;
+};
 
-message_information Data;
-struct timeval tp;
+enum SenderState {SYNCING, TRANSMITTING, WAITING};
+SenderState current_state = SYNCING;
 
 esp_now_peer_info_t peerInfo;
 
+TelemetryData sendBuffer[12];
+int bufferIndex = 0;
+
+
+int32_t calculated_SpO2;
+int8_t valid_flag;
+int32_t calculated_HR;
+unsigned long measurement_time;
+uint16_t current_R;
+uint16_t current_IR;
+
+
+TelemetryData getCurrentTelemetry() {
+    return {
+      .n_spo2 = calculated_SpO2,
+      .ch_spo2_valid = valid_flag,
+      .n_heart_rate = calculated_HR,
+      .ch_hr_valid = valid_flag,
+      .measurement_time = (start_epoch_time*1000)+(millis()-start_milli_time),
+      .PPG_R = current_R,
+      .PPG_IR = current_R
+    };
+  }
+
+
+void flushBuffer() {
+    if(bufferIndex == 0) return;
+    Message msg = {.cmd = DATA};
+    memcpy(msg.payload.telemetry, sendBuffer, bufferIndex * sizeof(TelemetryData));
+    esp_now_send(receiverAddress, (uint8_t*)&msg, sizeof(Command) + bufferIndex * sizeof(TelemetryData));
+    bufferIndex = 0;
+  }
+  
+
+
+void transmitData() {
+    sendBuffer[bufferIndex++] = getCurrentTelemetry();
+    if(bufferIndex == 12) {
+      Message msg = {.cmd = DATA};
+      memcpy(msg.payload.telemetry, sendBuffer, sizeof(sendBuffer));
+      esp_now_send(receiverAddress, (uint8_t*)&msg, sizeof(msg));
+      bufferIndex = 0;
+    }
+  }
+  
+void bufferData() {
+sendBuffer[bufferIndex++] = getCurrentTelemetry();
+}
+
+
 // callback when data is sent
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  // Serial.print("\r\nLast Packet Send Status:\t");
-  // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  Message *msg;
+  memcpy(msg, incomingData, sizeof(Message));
+  switch(msg->cmd) {
+    case SYNC_TIME:
+      start_epoch_time = msg->payload.timestamp;
+      start_milli_time = millis();
+      current_state = TRANSMITTING;
+      break;
+    case WAIT:
+      current_state = WAITING;
+      break;
+    case READY:
+      current_state = TRANSMITTING;
+      flushBuffer();
+      break;
+    default: break;
+  }
 }
 
 
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len){
-    state = 1;
-    memcpy(&start_epoch_time, incomingData, sizeof(start_epoch_time));
-    start_milli_time = millis();
-    Serial.println("Connected to ESP Now");
-}
+
 
 ///////// Gets Fired on DRDY event/////////////////////////////
 ICACHE_RAM_ATTR void afe44xx_drdy_event()
@@ -302,61 +369,19 @@ void setup()
     pinMode(BATTERY_IN, INPUT);
     pinMode(CHARGER,OUTPUT);
     digitalWrite(RED_LED, HIGH);
-    // Enable saved past credential by autoReconnect option,
-    // even once it is disconnected.
-    // Config.apid = "SpO2ap";
-    // Config.apip =  IPAddress(192,168,10,101);
-    // Config.autoReconnect = false;
-    // Config.retainPortal = true;
-    // Config.autoRise = true;
-    // //Config.preserveAPMode = true;
-    // Config.immediateStart = true;
-    // Config.hostName = "esp32-01";
-    // Portal.config(Config);
-    // Server.on("/", rootPage);
-    // // Establish a connection with an autoReconnect option.
 
-    // if (Portal.begin()) {
-    //     Serial.println("WiFi connected: " + WiFi.localIP().toString());
-    //     Serial.println(WiFi.getHostname());
-    // }
-    // timeClient.begin();
-    // timeClient.update();
-    // start_epoch_time = timeClient.getEpochTime();
-    // start_milli_time = millis();
-
-    //set up for data saving
-    // Serial.println("CLEARDATA");
-    // Serial.println("LABEL,Date,Time,Timestamp,PPG_IR,PPG_Red");
-    // Serial.println("RESETTIMER");
-    // tb.setBufferSize(256);
-
-    while(state == 0){
-        WiFi.mode(WIFI_STA);
-        selected_channel -= 1;
-        esp_wifi_set_channel(wifi_channels[selected_channel], WIFI_SECOND_CHAN_NONE); // change to match receiver channel
-        esp_now_deinit(); 
-        if (esp_now_init() != ESP_OK) {
-            Serial.println("Error initializing ESP-NOW");
-            return;
-        }
-
-        esp_now_register_recv_cb((OnDataRecv)); 
-        // Register peer
-        Serial.print("Tried to use channel: ");
-        Serial.println(wifi_channels[selected_channel]);
-    }
-
-    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-    peerInfo.channel = 0;  
+    Serial.begin(115200);
+    WiFi.mode(WIFI_STA);
+    esp_now_init();
+    esp_now_register_recv_cb(OnDataRecv);
+  
+    esp_now_peer_info_t peerInfo;
+    memcpy(peerInfo.peer_addr, receiverAddress, 6);
+    peerInfo.channel = 0;
     peerInfo.encrypt = false;
+    esp_now_add_peer(&peerInfo);
 
-    if (esp_now_add_peer(&peerInfo) != ESP_OK){
-        Serial.println("Failed to add peer");
-        return;
-    }
     delay(500);
-    esp_now_register_send_cb(OnDataSent);
 
 
     Serial.println("Intilazition AFE44xx.. ");
@@ -427,18 +452,9 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
     // payload += "}";
     // payload += "}";
 
-    Data.PPG_IR = aun_ir_buffer[n_buffer_count];
-    Data.PPG_R = aun_red_buffer[n_buffer_count];
-    Data.measurement_time = (start_epoch_time  * 1000)+ (millis() - start_milli_time);
+    current_R = aun_red_buffer[n_buffer_count];
+    current_IR = aun_ir_buffer[n_buffer_count];
 
-    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &Data, sizeof(Data));
-   
-    if (result == ESP_OK) {
-      Serial.println("Sent with success");
-    }
-    else {
-      Serial.println("Error sending the data");
-    }
 
     // Serial.println(payload);
 
@@ -482,17 +498,17 @@ void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
 //  Serial.println("Connected to AP");
 //}
 
-void printArray(int32_t  *arr, char *name, int32_t size_n) {
-    Serial.print(name);
-    Serial.print( " = [");
-    for (size_t i = 0; i < size_n; ++i) {
-        Serial.print(arr[i]);
-        if (i < size_n - 1) {
-            Serial.print(", ");
-        }
-    }
-    Serial.println( "]");
-}
+// void printArray(int32_t  *arr, char *name, int32_t size_n) {
+//     Serial.print(name);
+//     Serial.print( " = [");
+//     for (size_t i = 0; i < size_n; ++i) {
+//         Serial.print(arr[i]);
+//         if (i < size_n - 1) {
+//             Serial.print(", ");
+//         }
+//     }
+//     Serial.println( "]");
+// }
 
 
 // void reconnect() {
@@ -710,11 +726,11 @@ void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_si
   \retval       None
 */
 {
-    printArray(pn_x, "Data Values", n_size);
+    // printArray(pn_x, "Data Values", n_size);
     find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
-    printArray(pn_locs, "Peaks Above", *n_npks);
+    // printArray(pn_locs, "Peaks Above", *n_npks);
     remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
-    printArray(pn_locs, "Peaks Remove Close", *n_npks);
+    // printArray(pn_locs, "Peaks Remove Close", *n_npks);
     *n_npks = min( *n_npks, n_max_num );
 }
 
@@ -766,15 +782,14 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
         n_peak_interval_sum = n_peak_interval_sum / (n_npks - 1);
         *pn_heart_rate = (int32_t)( (60000) / n_peak_interval_sum );
         *pch_hr_valid  = 1;
-        Data.n_heart_rate = (int32_t)( (60000) / n_peak_interval_sum );
-        Data.ch_hr_valid = 1;
+        calculated_HR = (int32_t)( (60000) / n_peak_interval_sum );
+        valid_flag = 1;
     }
     else  {
         *pn_heart_rate = -999; // unable to calculate because # of peaks are too small
         *pch_hr_valid  = 0;
 
-        Data.n_heart_rate = -999;
-        Data.ch_hr_valid = 0;
+        valid_flag = 0;
     }
 
     //  load raw value again for SPO2 calculation : RED(=y) and IR(=X)
@@ -843,15 +858,15 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
         n_spo2_calc = uch_spo2_table[n_ratio_average] ;
         *pn_spo2 = n_spo2_calc ;
         *pch_spo2_valid  = 1;//  float_SPO2 =  -45.060*n_ratio_average* n_ratio_average/10000 + 30.354 *n_ratio_average/100 + 94.845 ;  // for comparison with table
-        Data.n_spo2 = n_spo2_calc;
-        Data.ch_spo2_valid = 1;
+        calculated_SpO2= n_spo2_calc;
+        valid_flag = 1;
     }
     else {
         *pn_spo2 =  -999 ; // do not use SPO2 since signal an_ratio is out of range
         *pch_spo2_valid  = 0;
 
-        Data.n_spo2 = -999;
-        Data.ch_spo2_valid = 0;
+        calculated_SpO2 = -999;
+        valid_flag = 0;
     }
 }
 
@@ -912,6 +927,8 @@ void LEDFunction (int battStatus){
             break;
     }
 }
+
+
 
 void loop()
 {
@@ -1000,26 +1017,10 @@ void loop()
             // Serial.println("xasdasdx!!!");
             estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
            
-            // if (n_spo2 == -999){
-            //     Serial.println("Probe error!!!!");
-            //     tb.sendTelemetryData("SpO2", n_spo2);
-
-            //     tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            // }
-            // else
-            // {
-
-            //     // Serial.print(" Sp02 : ");
-            //     // Serial.print(n_spo2);
-            //     // Serial.print("% ,");
-            //     // Serial.print("Pulse rate :");
-            //     // Serial.println(n_heart_rate);
-            //     tb.sendTelemetryData("SpO2", n_spo2);
-
-            //     tb.sendTelemetryData("Pulse rate", n_heart_rate);
-            // }
             n_buffer_count = 0;
         }
+        if (current_state == TRANSMITTING) transmitData();
+        else if (current_state == WAITING) bufferData();
         afe44xx_data_ready = false;
         drdy_trigger = LOW;
         attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
