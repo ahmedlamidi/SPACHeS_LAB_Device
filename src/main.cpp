@@ -142,24 +142,39 @@ void rootPage() {
 
 void setup() {
   Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
 
   Config.apid = "SpO2ap";
+  Config.apip = IPAddress(192,168,10,101);
   Config.autoReconnect = true;
+  Config.retainPortal = false;
+  Config.autoRise = true;
+  Config.immediateStart = true;
+  Config.hostName = "esp32-01";
+  Config.channel = 6;
   Portal.config(Config);
-  Portal.begin();
-  timeClient.begin();
+  Server.on("/", rootPage);
+  if(Portal.begin()){
+    timeClient.begin();
+    esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_ps(WIFI_PS_NONE); 
+    esp_now_init();
+    esp_now_register_recv_cb(OnDataRecv);
+  
+    esp_now_peer_info_t peerInfo;
 
-  WiFi.mode(WIFI_STA);
-  esp_wifi_set_channel(WiFi.channel(), WIFI_SECOND_CHAN_NONE);
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    
+    if (esp_now_add_peer(&peerInfo) != ESP_OK){
+      Serial.println("Failed to add peer");
+      return;
+  }
 
-  esp_now_init();
-  esp_now_register_recv_cb(OnDataRecv);
+  }
+  
 
-  esp_now_peer_info_t peerInfo;
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-  esp_now_add_peer(&peerInfo);
 }
 
 void uploadTelemetry() {
