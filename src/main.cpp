@@ -46,18 +46,19 @@ esp_now_peer_info_t peerInfo;
 
 #define QUEUE_SIZE 200
 
-struct TelemetryData {
+typedef struct Data {
   int32_t n_spo2;  //SPO2 value
   int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
   int32_t n_heart_rate; //heart rate value
   int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
-  unsigned long start_milli_time;
+  unsigned long long measurement_time;
   uint16_t PPG_R;
   uint16_t PPG_IR;
-};
+
+} message_information;
 
 // Ring buffer
-TelemetryData telemetryQueue[QUEUE_SIZE];
+message_information telemetryQueue[QUEUE_SIZE];
 volatile int queueHead = 0;
 volatile int queueTail = 0;
 
@@ -69,14 +70,14 @@ bool isQueueEmpty() {
   return queueHead == queueTail;
 }
 
-bool enqueue(const TelemetryData& data) {
+bool enqueue(const message_information& data) {
   if (isQueueFull()) {Serial.println("full");return false;}
   telemetryQueue[queueHead] = data;
   queueHead = (queueHead + 1) % QUEUE_SIZE;
   return true;
 }
 
-bool dequeue(TelemetryData &data) {
+bool dequeue(message_information &data) {
   if (isQueueEmpty()) return false;
   data = telemetryQueue[queueTail];
   queueTail = (queueTail + 1) % QUEUE_SIZE;
@@ -85,12 +86,12 @@ bool dequeue(TelemetryData &data) {
 
 
 // Create a struct_message called myData
-TelemetryData myData;
+message_information myData;
 
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
     current_state = 1;
-  memcpy(&myData, incomingData, sizeof(TelemetryData));
+  memcpy(&myData, incomingData, sizeof(message_information));
   enqueue(myData); // Add to queue
 
   // Get timestamp
@@ -109,15 +110,10 @@ void processTelemetry(){
 
 
 
-  TelemetryData data;
+  message_information data;
   while (dequeue(data)) {
-    if (start_milli_time == 0) {
-      start_milli_time = data.start_milli_time;
-      timeClient.update();
-      start_epoch_time = timeClient.getEpochTime();
-    }
-    unsigned long long delta = data.start_milli_time - start_milli_time;
-    unsigned long long actual_time_stamp = (start_epoch_time * 1000) + delta;
+    unsigned long long actual_time_stamp = data.measurement_time
+    ;
     // unsigned long long actual_time_stamp = (start_epoch_time * 1000) + millis();
   
 
