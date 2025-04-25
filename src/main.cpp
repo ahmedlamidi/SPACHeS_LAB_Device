@@ -121,7 +121,6 @@ void broadcastTimestamp() {
   msg.cmd = SYNC_TIME;
   timeClient.update();
   msg.payload.timestamp = timeClient.getEpochTime();
-  p
   esp_now_send(broadcastAddress, (uint8_t*)&msg, sizeof(Command) + sizeof(uint64_t));
 }
 
