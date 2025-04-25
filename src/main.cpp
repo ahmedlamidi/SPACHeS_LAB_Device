@@ -105,11 +105,11 @@ TelemetryData myData;
 
 
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-  Message *msg;
-  memcpy(msg, incomingData, sizeof(Message));
-  if (msg->cmd == DATA) {
+  Message msg;
+  memcpy(&msg, incomingData, sizeof(Message));
+  if (msg.cmd == DATA) {
     for(int i=0; i < ((len - sizeof(Command))/sizeof(TelemetryData)); i++) {
-      enqueue(msg->payload.telemetry[i]);
+      enqueue(msg.payload.telemetry[i]);
     }
     current_state = 1;
     lastDataReceived = millis();
