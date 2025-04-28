@@ -53,7 +53,7 @@
 // constexpr uint16_t THINGSBOARD_PORT = 1883U;
 
 // REPLACE WITH YOUR RECEIVER MAC Address
-uint8_t broadcastAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x68, 0xA8};
+uint8_t broadcastAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x7F, 0xD0};
 // 34:CD:B0:08:68:A8
 
 
