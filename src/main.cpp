@@ -167,10 +167,10 @@ const int SPIDRDY = 4;  // data ready pin - IO4
 volatile int drdy_trigger = LOW;
 const int RESET = 0; // reset pin - IO0
 const int PWDN = 2; // powerdown pin - IO2
-#define GRN_LED 27          //TBD after soldering
-#define RED_LED 26          //TBD after soldering
-#define BATTERY_IN 39
-#define CHARGER 18
+#define GRN_LED 47          //TBD after soldering
+#define RED_LED 48          //TBD after soldering
+#define BATTERY_INPUT 6
+#define BATTERY_OUT 16
 
 void afe44xxInit (void);
 void afe44xxWrite (uint8_t address, uint32_t data);
@@ -299,8 +299,8 @@ void setup()
     //LED and battery read pins
     pinMode(GRN_LED, OUTPUT);
     pinMode(RED_LED, OUTPUT);
-    pinMode(BATTERY_IN, INPUT);
-    pinMode(CHARGER,OUTPUT);
+    pinMode(BATTERY_INPUT, INPUT);
+    pinMode(BATTERY_OUT,OUTPUT);
     digitalWrite(RED_LED, HIGH);
     // Enable saved past credential by autoReconnect option,
     // even once it is disconnected.
@@ -390,8 +390,8 @@ void setup()
     //   attachInterrupt(0, afe44xx_drdy_event, RISING );
     // set SPI transmission
     SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
-    //SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
-    SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
+    SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
+    // SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
     SPI.setBitOrder (MSBFIRST);           //MSB first
 
     // Packet structure
@@ -580,25 +580,25 @@ void afe44xxInit (void)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void afe44xxWrite (uint8_t address, uint32_t data)
 {
-    digitalWrite (SS, LOW); // enable device
+    digitalWrite (SPISTE, LOW); // enable device
     SPI.transfer (address); // send address to device
     SPI.transfer ((data >> 16) & 0xFF); // write top 8 bits
     SPI.transfer ((data >> 8) & 0xFF); // write middle 8 bits
     SPI.transfer (data & 0xFF); // write bottom 8 bits
-    digitalWrite (SS, HIGH); // disable device
+    digitalWrite (SPISTE, HIGH); // disable device
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 unsigned long afe44xxRead (uint8_t address)
 {
     unsigned long data = 0;
-    digitalWrite (SS, LOW); // enable device
+    digitalWrite (SPISTE, LOW); // enable device
     SPI.transfer (address); // send address to device
     //SPI.transfer (data);
     data |= ((unsigned long)SPI.transfer (0) << 16); // read top 8 bits data
     data |= ((unsigned long)SPI.transfer (0) << 8); // read middle 8 bits  data
     data |= SPI.transfer (0); // read bottom 8 bits data
-    digitalWrite (SS, HIGH); // disable device
+    digitalWrite (SPISTE, HIGH); // disable device
 
 
     return data; // return with 24 bits of read data
@@ -931,14 +931,14 @@ void loop()
     //     }
     // }
     //voltage read
-    voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
+    voltage = ReadVoltage(BATTERY_INPUT);//ADC to voltage conversion
     percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
     if(voltage > 4.19) percentage = 100; //upper limit
     if(voltage < 3.5) percentage = 0; //Lower limit
 
     // Charge logic
-    if(voltage > 4.1) digitalWrite(CHARGER, LOW);
-    if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
+    if(voltage > 4.1) digitalWrite(BATTERY_OUT, LOW);
+    if(voltage < 3.9) digitalWrite(BATTERY_OUT,HIGH);
 
     // To make the battery ot workl
     // digitalWrite(CHARGER, LOW);
