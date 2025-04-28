@@ -18,7 +18,8 @@
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
-uint8_t broadcastAddress[] = {0x98, 0xCD, 0xAC, 0x88, 0x12, 0x1C};
+uint8_t broadcastAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x68, 0xA8};
+// 34:CD:B0:08:68:A8
 
 
 int current_state = 1;
@@ -216,8 +217,8 @@ void setup() {
 
 void loop() {
     if(current_state == 0){ 
-        int data = 1;
-        esp_now_send(broadcastAddress, (uint8_t *)&data, sizeof(data));
+        start_epoch_time = timeClient.getEpochTime();
+        esp_now_send(broadcastAddress, (uint8_t *)&start_epoch_time, sizeof(start_epoch_time));
     }
 
     Portal.handleClient(); // Handle Wi-Fi AutoConnect portal
