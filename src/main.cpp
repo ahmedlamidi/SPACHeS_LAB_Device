@@ -20,7 +20,7 @@ NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
 uint8_t broadcastAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x68, 0xA8};
 // 34:CD:B0:08:68:A8
-
+// 34:CD:B0:08:7F:D0
 
 int current_state = 1;
 
