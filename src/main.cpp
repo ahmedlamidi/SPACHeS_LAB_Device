@@ -18,7 +18,7 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
 
 // ESP-NOW
-uint8_t broadcastAddress[] = {0x98,0xCD,0xAC,0x88,0x12,0x1C};
+uint8_t broadcastAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x68, 0xA8};
 esp_now_peer_info_t peerInfo;
 
 // ThingsBoard
@@ -26,6 +26,8 @@ constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
 constexpr uint16_t THINGSBOARD_PORT = 1883U;
 constexpr char TOKEN[] = "spo2_123";
 constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
+
+
 WiFiClient espClient;
 Arduino_MQTT_Client mqttClient(espClient);
 ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
@@ -46,10 +48,16 @@ typedef struct Data {
   uint16_t PPG_R;
   uint16_t PPG_IR;
 } message_information;
+
+
 message_information telemetryQueue[QUEUE_SIZE];
+
 volatile int queueHead = 0, queueTail = 0;
+
 bool isQueueFull()  { return ((queueHead+1)%QUEUE_SIZE)==queueTail; }
+
 bool isQueueEmpty(){ return queueHead==queueTail; }
+
 bool enqueue(const message_information& d){
   if(isQueueFull()){ Serial.println("Queue full!"); return false; }
   telemetryQueue[queueHead]=d;
@@ -117,6 +125,7 @@ void rootPage() {
 }
 
 void setup() {
+
   Serial.begin(115200);
   WiFi.mode(WIFI_STA);
 
@@ -126,6 +135,7 @@ void setup() {
   Config.retainPortal = false;
   Config.autoRise = true;
   Config.immediateStart = true;
+
   Config.hostName = "esp32-01";
   Config.channel = 6;
   Portal.config(Config);
@@ -231,6 +241,7 @@ void loop() {
 
   // let SimpleFSM handle any timed transitions
   fsm.run();
+  Serial.print(fsm.getState()->getName());
 
   // once upload is done, trigger back to Receiving
   if(fsm.getState()==&states[2] && isQueueEmpty()){
