@@ -198,7 +198,6 @@ void setup() {
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW init failed");
-    while(1);
   }
   esp_now_register_recv_cb(OnDataRecv);
   memcpy(peerInfo.peer_addr, receiverAddress, 6);
@@ -226,6 +225,7 @@ void setup() {
 
   afe44xxInit();
   Serial.println("AFE44xx ready");
+  digitalWrite(RED_LED, LOW);
 
   // FSM
   fsm.add(fsmTransitions,
@@ -245,6 +245,7 @@ void onEnterWaitStore() { /* buffer until READY */ }
 // ─── LOOP ────────────────────────────────────────────────────────────────────
 void loop() {
   fsm.run();
+  Serial.println(fsm.getState()->getName());
 
   // blink green LED
   static uint32_t last = 0;
@@ -279,9 +280,11 @@ void loop() {
 
   // state behavior
   if (fsm.getState() == &fsmStates[1]) {
+    Serial.println("state 1");
     transmitData();
   } else if (fsm.getState() == &fsmStates[2]) {
     bufferData();
+    Serial.println("state 2");
   }
 }
 
