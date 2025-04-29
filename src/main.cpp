@@ -1,109 +1,45 @@
-//////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////
 //
 //   AFE44xx Arduino Firmware
+//   (with SimpleFSM-based ESP-NOW sender state machine)
 //
 //   Copyright (c) 2016 ProtoCentral
-//
-//   SpO2 computation based on original code from Maxim Integrated
-//
-//   This software is licensed under the MIT License(http://opensource.org/licenses/MIT).
-//
-//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
-//   NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-//   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-//   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-//   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-//
-//   For information on how to use the HealthyPi, visit https://github.com/Protocentral/afe44xx_Oximeter
+//   License: MIT
+//   https://github.com/Protocentral/afe44xx_Oximeter
 /////////////////////////////////////////////////////////////////////////////////////////
 
-// #define THINGSBOARD_ENABLE_DEBUG 1
 #include <Arduino.h>
 #include <SPIFFS.h>
-#include <cmath>            // Math functions
-#include <cstdio>           // Standard I/O functions
-#include <SPI.h>             // SPI communication library
-#include <WiFi.h>            // Wi-Fi functionality
-#include <WiFiUdp.h>         // Wi-Fi UDP communication
-#include <WebServer.h>       // HTTP server
-#include <NTPClient.h>       // NTP for time synchronization
-#include <time.h>            // Time functions
-#include <ThingsBoard.h>     // ThingsBoard IoT platform
-#include <Arduino_MQTT_Client.h> // Arduino-specific MQTT client
-#include <AutoConnect.h>
+#include <SPI.h>
+#include <WiFi.h>
 #include <esp_now.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+#include <WebServer.h>
+#include <AutoConnect.h>
+#include <Arduino_MQTT_Client.h>
+#include <ThingsBoard.h>
+#include <SimpleFSM.h>
+#include <ArduinoJson.h>
+#include <cmath>
 
-// change path to spiffs and use deep
-// typo in autoconnect , wrongly uses the HTTPCLient instead of HttpClient -> make changes when compiling
-// Make changes in HTTPUpdate.h
-// callbackwatchdog.h - Delete skip handled events == False
-// sudo chmod a+rw /dev/ttyUSB0 -> to allow vscode to hx
-//wifi and device on Thingsboard
-//#define WIFI_AP "NDSU IoT"
-//#define WIFI_PASSWORD "bacondotwager"
-// #define TOKEN "spo2_mark"
-// char thingsboardServer[] = "http://131.247.15.226";
-
-// constexpr char TOKEN[] = "spo2_123";
-// constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
-// // Thingsboard we want to establish a connection too
-// constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
-// // MQTT port used to communicate with the server, 1883 is the default unencrypted MQTT port.
-// constexpr uint16_t THINGSBOARD_PORT = 1883U;
-
-// REPLACE WITH YOUR RECEIVER MAC Address
-uint8_t receiverAddress[] = {0x34, 0xCD, 0xB0, 0x08, 0x68, 0xA8};
-// 34:CD:B0:08:68:A8
-
-
-
-WiFiClient espClient; // create a wificlient
-
-// Arduino_MQTT_Client mqttClient(espClient); // create arduino mqtt client with the constructor
-// ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE); // In version 0.7.0 this means QOS level is set to 1
-// int status = WL_IDLE_STATUS;
-// unsigned long lastSend;
-
-//Autoconnect Wifi
-// WebServer Server;
-// AutoConnect Portal(Server);
-// AutoConnectConfig Config;
-
-//NTP library to get real time from server
-// #define NTP_OFFSET   0 * 60      // In seconds
-// #define NTP_INTERVAL 5 * 1000    // In miliseconds
-// #define NTP_ADDRESS  "pool.ntp.org"
-// WiFiUDP ntpUDP;
-// NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
-
-//LED Time Variables
-unsigned long current_time_LED;
-unsigned long previous_time_LED;
-unsigned long elapsed_time_LED = 0;
-float voltage = 0.0f;
-float percentage = 0.0f;
-int battStatus = 5; //Start in default mode (not transmitting)
-int ledState = LOW;   // ledState used to set the LED
-int failure_count = 0;
-esp_now_peer_info_t peerInfo;
-
-//afe44xx Register definition
-#define CONTROL0    0x00
-#define LED2STC     0x01
-#define LED2ENDC    0x02
+// ─── AFE44xx REGISTER DEFINITIONS ────────────────────────────────────────────
+#define CONTROL0      0x00
+#define LED2STC       0x01
+#define LED2ENDC      0x02
 #define LED2LEDSTC    0x03
 #define LED2LEDENDC   0x04
-#define ALED2STC    0x05
-#define ALED2ENDC   0x06
-#define LED1STC     0x07
-#define LED1ENDC    0x08
+#define ALED2STC      0x05
+#define ALED2ENDC     0x06
+#define LED1STC       0x07
+#define LED1ENDC      0x08
 #define LED1LEDSTC    0x09
-#define LED1LEDENDC   0x0a
-#define ALED1STC    0x0b
-#define ALED1ENDC   0x0c
-#define LED2CONVST    0x0d
-#define LED2CONVEND   0x0e
-#define ALED2CONVST   0x0f
+#define LED1LEDENDC   0x0A
+#define ALED1STC      0x0B
+#define ALED1ENDC     0x0C
+#define LED2CONVST    0x0D
+#define LED2CONVEND   0x0E
+#define ALED2CONVST   0x0F
 #define ALED2CONVEND  0x10
 #define LED1CONVST    0x11
 #define LED1CONVEND   0x12
@@ -114,931 +50,439 @@ esp_now_peer_info_t peerInfo;
 #define ADCRSTCNT1    0x17
 #define ADCRSTENDCT1  0x18
 #define ADCRSTCNT2    0x19
-#define ADCRSTENDCT2  0x1a
-#define ADCRSTCNT3    0x1b
-#define ADCRSTENDCT3  0x1c
-#define PRPCOUNT    0x1d
-#define CONTROL1    0x1e
-#define SPARE1      0x1f
-#define TIAGAIN     0x20
+#define ADCRSTENDCT2  0x1A
+#define ADCRSTCNT3    0x1B
+#define ADCRSTENDCT3  0x1C
+#define PRPCOUNT      0x1D
+#define CONTROL1      0x1E
+#define TIAGAIN       0x20
 #define TIA_AMB_GAIN  0x21
-#define LEDCNTRL    0x22
-#define CONTROL2    0x23
-#define SPARE2      0x24
-#define SPARE3      0x25
-#define SPARE4      0x26
-#define SPARE4      0x26
-#define RESERVED1   0x27
-#define RESERVED2   0x28
-#define ALARM     0x29
-#define LED2VAL     0x2a
-#define ALED2VAL    0x2b
-#define LED1VAL     0x2c
-#define ALED1VAL    0x2d
-#define LED2ABSVAL    0x2e
-#define LED1ABSVAL    0x2f
-#define DIAG      0x30
-#define count 60
+#define LEDCNTRL      0x22
+#define CONTROL2      0x23
+#define ALARM         0x29
+#define LED2VAL       0x2A
+#define ALED2VAL      0x2B
+#define LED1VAL       0x2C
+#define ALED1VAL      0x2D
+#define DIAG          0x30
 
-#define CES_CMDIF_PKT_START_1   0x0A
-#define CES_CMDIF_PKT_START_2   0xFA
-#define CES_CMDIF_TYPE_DATA   0x02
-#define CES_CMDIF_PKT_STOP    0x0B
+// ─── PIN DEFINITIONS ─────────────────────────────────────────────────────────
+const int SPISTE    = 15;   // AFE44xx chip-select (CS)
+const int SPIDRDY   = 4;    // Data-ready interrupt from AFE44xx
+const int RESET_PIN = 0;    // AFE44xx RESET
+const int PWDN_PIN  = 2;    // AFE44xx PWDN
+#define GRN_LED     27
+#define RED_LED     26
+#define BATTERY_IN  39
+#define CHARGER     18
 
+// ─── ESP-NOW PEER ────────────────────────────────────────────────────────────
+uint8_t receiverAddress[] = {0x34,0xCD,0xB0,0x08,0x68,0xA8};
+esp_now_peer_info_t peerInfo;
 
-//int IRheartsignal[count];
-//int Redheartsignal[count];
-int IRdc[count];
-int Reddc[count];
-double difIRheartsig_dc;
-double difREDheartsig_dc;
-double powdifIR;
-double powdifRed;
-double IRac;
-double Redac;
-double SpOpercentage;
-double Ratio;
-unsigned long start_time;
-unsigned long end_time;
-
-//Pin declarations
-const int SPISTE = 15;  // chip select - IO15
-const int SPIDRDY = 4;  // data ready pin - IO4
-volatile int drdy_trigger = LOW;
-const int RESET = 0; // reset pin - IO0
-const int PWDN = 2; // powerdown pin - IO2
-#define GRN_LED 27          //TBD after soldering
-#define RED_LED 26          //TBD after soldering
-#define BATTERY_IN 39
-#define CHARGER 18
-
-void afe44xxInit (void);
-void afe44xxWrite (uint8_t address, uint32_t data);
-unsigned long afe44xxRead (uint8_t address);
-signed long average_BPM( signed long );
-volatile char DataPacketHeader[6];
-volatile char DataPacket[10];
-volatile char DataPacketFooter[2];
-int datalen = 0x09;
-//long unsigned int time;
-
-volatile static int SPI_RX_Buff_Count = 0;
-volatile char *SPI_RX_Buff_Ptr;
-volatile int afe44xx_data_ready = false;
-volatile unsigned int pckt = 0, buff = 0, t = 0;
-unsigned long ueegtemp = 0, ueegtemp2 = 0;
-unsigned long IRtemp, REDtemp;
-signed long seegtemp = 0, seegtemp2 = 0;
-volatile int i;
-
-
-uint16_t aun_ir_buffer[100]; //infrared LED sensor data
-uint16_t aun_red_buffer[100];  //red LED sensor data
-unsigned long time_stamps[100]; // timestamp data
-
-#define FS            25    //sampling frequency
-#define BUFFER_SIZE  (FS*4)
-#define MA4_SIZE  4 // DO NOT CHANGE
-#define min(x,y) ((x) < (y) ? (x) : (y))
-
-const uint8_t uch_spo2_table[184] = { 95, 95, 95, 96, 96, 96, 97, 97, 97, 97, 97, 98, 98, 98, 98, 98, 99, 99, 99, 99,
-                                      99, 99, 99, 99, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-                                      100, 100, 100, 100, 99, 99, 99, 99, 99, 99, 99, 99, 98, 98, 98, 98, 98, 98, 97, 97,
-                                      97, 97, 96, 96, 96, 96, 95, 95, 95, 94, 94, 94, 93, 93, 93, 92, 92, 92, 91, 91,
-                                      90, 90, 89, 89, 89, 88, 88, 87, 87, 86, 86, 85, 85, 84, 84, 83, 82, 82, 81, 81,
-                                      80, 80, 79, 78, 78, 77, 76, 76, 75, 74, 74, 73, 72, 72, 71, 70, 69, 69, 68, 67,
-                                      66, 66, 65, 64, 63, 62, 62, 61, 60, 59, 58, 57, 56, 56, 55, 54, 53, 52, 51, 50,
-                                      49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 31, 30, 29,
-                                      28, 27, 26, 25, 23, 22, 21, 20, 19, 17, 16, 15, 14, 12, 11, 10, 9, 7, 6, 5,
-                                      3, 2, 1
-} ;
-
-static  int32_t an_x[ BUFFER_SIZE];
-static  int32_t an_y[ BUFFER_SIZE];
-
-volatile int8_t n_buffer_count; //data length
-
-int32_t n_spo2;  //SPO2 value
-int8_t ch_spo2_valid;  //indicator to show if the SPO2 calculation is valid
-int32_t n_heart_rate; //heart rate value
-int8_t  ch_hr_valid;  //indicator to show if the heart rate calculation is valid
-
-long status_byte = 0;
-uint8_t LeadStatus = 0;
-boolean leadoff_deteted = true;
-uint8_t spo2_probe_open = false;
-int dec = 0;
-
-//timestamp variables
-unsigned long long start_epoch_time;
-unsigned long long time_stamp;
-unsigned long start_milli_time;
-unsigned long real_time;
-int ii = 0;
-
-
-int state = 0; // state 0 is not yet starting
-              // starte 1 is sending data
-
-
-uint8_t wifi_channels[2] = {6, 11};
-int selected_channel = 0;
-
-
-
-// void rootPage(){
-//     char content[] = "ESP32 Autoconnect Setup";
-//     Server.send(200, "text/plain", content); // send the content to the server
-// }
-
-enum Command : uint8_t {SYNC_TIME, READY, WAIT, DATA};
+// ─── TELEMETRY TYPES & BUFFERS ───────────────────────────────────────────────
+enum MsgCmd : uint8_t { SYNC_TIME = 1, DATA = 2, WAIT = 3, READY = 4 };
 struct TelemetryData {
-  int32_t n_spo2;
-  int8_t ch_spo2_valid;
-  int32_t n_heart_rate;
-  int8_t ch_hr_valid;
-  unsigned long measurement_time;
+  int32_t  n_spo2;
+  int8_t   ch_spo2_valid;
+  int32_t  n_heart_rate;
+  int8_t   ch_hr_valid;
+  uint64_t measurement_time;
   uint16_t PPG_R;
   uint16_t PPG_IR;
 };
-
-struct Message {
-  Command cmd;
-  union {
-    uint64_t timestamp;
-    TelemetryData telemetry[6];
-  } payload;
+union Payload {
+  uint64_t      timestamp;
+  TelemetryData telemetry[6];
 };
-
-enum SenderState {SYNCING, TRANSMITTING, WAITING};
-SenderState current_state = SYNCING;
-
-
+struct Message {
+  MsgCmd  cmd;
+  Payload payload;
+};
 TelemetryData sendBuffer[6];
-int bufferIndex = 0;
+uint8_t     bufferIndex = 0;
 
+// ─── AFE44xx SAMPLE BUFFERS ──────────────────────────────────────────────────
+#define FS           25
+#define BUFFER_SIZE (FS*4)
+#define MA4_SIZE      4
+uint16_t aun_ir_buffer[100], aun_red_buffer[100];
+uint64_t time_stamps[100];
+volatile bool     drdy_trigger    = false;
+volatile uint16_t n_buffer_count  = 0;
+int32_t            calculated_SpO2;
+int8_t             valid_flag;
+int32_t            calculated_HR;
 
-int32_t calculated_SpO2;
-int8_t valid_flag;
-int32_t calculated_HR;
-unsigned long measurement_time;
-uint16_t current_R;
-uint16_t current_IR;
+// ─── TIME SYNC ───────────────────────────────────────────────────────────────
+uint64_t start_epoch_time, start_milli_time;
 
+// ─── NTP CLIENT ─────────────────────────────────────────────────────────────
+WiFiUDP    ntpUDP;
+NTPClient  timeClient(ntpUDP, "pool.ntp.org", 0, 5000);
 
-TelemetryData getCurrentTelemetry() {
-    return {
-      .n_spo2 = calculated_SpO2,
-      .ch_spo2_valid = valid_flag,
-      .n_heart_rate = calculated_HR,
-      .ch_hr_valid = valid_flag,
-      .measurement_time = (start_epoch_time*1000)+(millis()-start_milli_time),
-      .PPG_R = current_R,
-      .PPG_IR = current_R
-    };
-  }
+// ─── WEBSERVER & THINGSBOARD (unused here) ─────────────────────────────────
+WebServer            Server;
+AutoConnect          Portal(Server);
+AutoConnectConfig    Config;
+WiFiClient           espClient;
+Arduino_MQTT_Client  mqttClient(espClient);
+ThingsBoard          tb(mqttClient, 128);
 
+// ─── SIMPLEFSM SENDER SETUP ─────────────────────────────────────────────────
+void onEnterTimeSync();
+void onEnterTransmit();
+void onEnterWaitStore();
 
-void flushBuffer() {
-    if(bufferIndex == 0) return;
-    Message msg = {.cmd = DATA};
-    memcpy(msg.payload.telemetry, sendBuffer, bufferIndex * sizeof(TelemetryData));
-    Serial.print("2: ");
-    Serial.println(sizeof(msg));
-    esp_now_send(receiverAddress, (uint8_t*)&msg, sizeof(msg));
-    bufferIndex = 0;
-  }
-  
+State fsmStates[] = {
+  State("TimeSync",  onEnterTimeSync),
+  State("Transmit",  onEnterTransmit),
+  State("WaitStore", onEnterWaitStore)
+};
+enum Triggers { TRG_TimeReceived = 1, TRG_WaitReceived, TRG_ReadyReceived };
+Transition fsmTransitions[] = {
+  Transition(&fsmStates[0], &fsmStates[1], TRG_TimeReceived),
+  Transition(&fsmStates[1], &fsmStates[2], TRG_WaitReceived),
+  Transition(&fsmStates[2], &fsmStates[1], TRG_ReadyReceived)
+};
+SimpleFSM fsm;
 
+// ─── FORWARD DECLARATIONS ────────────────────────────────────────────────────
+void afe44xxInit();
+void afe44xxWrite(uint8_t addr, uint32_t data);
+uint32_t afe44xxRead(uint8_t addr);
+void sort_ascend(int32_t*, int);
+void find_peak_above(int32_t*,int32_t*,int32_t*,int,int);
+void sort_indices_descend(int32_t*,int32_t*,int);
+void remove_close_peaks(int32_t*,int32_t*,int32_t*,int);
+void find_peak(int32_t*,int32_t*,int32_t*,int,int,int,int);
+void estimate_spo2(uint16_t*,int,uint16_t*,int32_t*,int8_t*,int32_t*,int8_t*,uint64_t*);
+TelemetryData getCurrentTelemetry();
+void transmitData(), bufferData();
 
-void transmitData() {
-    sendBuffer[bufferIndex++] = getCurrentTelemetry();
-    if(bufferIndex == 6) {
-      Message msg = {.cmd = DATA};
-      memcpy(msg.payload.telemetry, sendBuffer, sizeof(sendBuffer));
-      Serial.print("1: ");
-      Serial.println(sizeof(msg));
-      esp_now_send(receiverAddress, (uint8_t*)&msg, sizeof(msg));
-      bufferIndex = 0;
-    }
-  }
-  
-void bufferData() {
-sendBuffer[bufferIndex++] = getCurrentTelemetry();
-}
-
-
-// callback when data is sent
+// ─── ESP-NOW RECEIVE CALLBACK ───────────────────────────────────────────────
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   Message msg;
   memcpy(&msg, incomingData, len);
-  
-  if (msg.cmd == SYNC_TIME) {
-    start_epoch_time = msg.payload.timestamp;
-    start_milli_time = millis();
-    current_state = TRANSMITTING;
-    Serial.println("SYNC_TIME received. Now TRANSMITTING.");
-  }
-  else if (msg.cmd == WAIT) {
-    current_state = WAITING;
-    Serial.println("WAIT received. Now WAITING.");
-  }
-  else if (msg.cmd == READY) {
-    current_state = TRANSMITTING;
-    flushBuffer();
-    Serial.println("READY received. Resuming TRANSMITTING.");
+  switch (msg.cmd) {
+    case SYNC_TIME:
+      start_epoch_time = msg.payload.timestamp;
+      start_milli_time = millis();
+      fsm.trigger(TRG_TimeReceived);
+      break;
+    case WAIT:
+      fsm.trigger(TRG_WaitReceived);
+      break;
+    case READY:
+      fsm.trigger(TRG_ReadyReceived);
+      break;
+    default: break;
   }
 }
 
-
-
-///////// Gets Fired on DRDY event/////////////////////////////
-ICACHE_RAM_ATTR void afe44xx_drdy_event()
-{
-    drdy_trigger = HIGH;
+// ─── AFE44xx DRDY INTERRUPT ─────────────────────────────────────────────────
+ICACHE_RAM_ATTR void IRAM_ATTR afe44xx_drdy_event() {
+  drdy_trigger = true;
 }
 
-
+// ─── SETUP ───────────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-
-  // --- LED and Battery Pin Initialization ---
   pinMode(GRN_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
   pinMode(BATTERY_IN, INPUT);
   pinMode(CHARGER, OUTPUT);
   digitalWrite(RED_LED, HIGH);
 
-  // --- Wi-Fi and ESP-NOW Initialization ---
+  // ESP-NOW
   WiFi.mode(WIFI_STA);
-
   if (esp_now_init() != ESP_OK) {
-    Serial.println("ESP-NOW initialization failed");
-    return;
+    Serial.println("ESP-NOW init failed");
+    while(1);
   }
   esp_now_register_recv_cb(OnDataRecv);
-
-  // --- Correct ESP-NOW Peer Configuration ---
-
-  esp_now_peer_info_t peerInfo = {};
   memcpy(peerInfo.peer_addr, receiverAddress, 6);
   peerInfo.channel = 0;
   peerInfo.encrypt = false;
-  peerInfo.ifidx = WIFI_IF_STA;
+  esp_now_add_peer(&peerInfo);
 
-  if (!esp_now_is_peer_exist(receiverAddress)) {
-    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-      Serial.println("Failed to add ESP-NOW peer");
-      return;
-    }
-  } else {
-    Serial.println("ESP-NOW peer already exists");
+  // NTP
+  timeClient.begin();
+  timeClient.update();
+
+  // SPI + AFE44xx
+  pinMode(RESET_PIN, OUTPUT);
+  pinMode(PWDN_PIN, OUTPUT);
+  pinMode(SPISTE, OUTPUT);
+  pinMode(SPIDRDY, INPUT_PULLUP);
+  SPI.begin(14,12,13,SPISTE);
+  attachInterrupt(digitalPinToInterrupt(SPIDRDY), afe44xx_drdy_event, FALLING);
+
+  // AFE44xx reset/pwdn
+  digitalWrite(RESET_PIN, LOW);  delay(5);
+  digitalWrite(RESET_PIN, HIGH); delay(5);
+  digitalWrite(PWDN_PIN, LOW);   delay(5);
+  digitalWrite(PWDN_PIN, HIGH);  delay(5);
+
+  afe44xxInit();
+  Serial.println("AFE44xx ready");
+
+  // FSM
+  fsm.add(fsmTransitions,
+          sizeof(fsmTransitions)/sizeof(fsmTransitions[0]));
+  fsm.setInitialState(&fsmStates[0]);
+}
+
+// ─── STATE-ENTRY CALLBACKS ──────────────────────────────────────────────────
+void onEnterTimeSync() {
+  Message m; m.cmd = SYNC_TIME; m.payload.timestamp = 0;
+  esp_now_send(receiverAddress,(uint8_t*)&m,sizeof(m));
+}
+
+void onEnterTransmit()  { transmitData(); }
+void onEnterWaitStore() { /* buffer until READY */ }
+
+// ─── LOOP ────────────────────────────────────────────────────────────────────
+void loop() {
+  fsm.run();
+
+  // blink green LED
+  static uint32_t last = 0;
+  static bool on = false;
+  if (millis() - last > 1000) {
+    on = !on;
+    digitalWrite(GRN_LED, on);
+    last = millis();
   }
 
-  delay(500); // Wait briefly after peer setup
+  // handle AFE44xx samples
+  if (drdy_trigger) {
+    drdy_trigger = false;
+    uint32_t rIR  = afe44xxRead(LED1VAL),
+             rRED = afe44xxRead(LED2VAL);
+    int32_t ir  = ((int32_t)(rIR  <<  8)) >> 12;
+    int32_t red = ((int32_t)(rRED <<  8)) >> 12;
+    aun_ir_buffer[n_buffer_count]  = ir;
+    aun_red_buffer[n_buffer_count] = red;
+    time_stamps[n_buffer_count]    = millis();
+    if (++n_buffer_count >= 100) {
+      estimate_spo2(aun_ir_buffer,100,
+                    aun_red_buffer,
+                    &calculated_SpO2,
+                    &valid_flag,
+                    &calculated_HR,
+                    &valid_flag,
+                    time_stamps);
+      n_buffer_count = 0;
+    }
+  }
 
-  // --- SPI Initialization for AFE44xx Sensor ---
-  Serial.println("Initializing AFE44xx...");
-  delay(2000);
-
-  analogReadResolution(12);
-
-  // SPI pins: SCLK (GPIO14), MISO (GPIO12), MOSI (GPIO13), CS (GPIO15)
-  SPI.begin(14, 12, 13, 15);
-
-  pinMode(RESET, OUTPUT);
-  pinMode(PWDN, OUTPUT);
-  pinMode(SPISTE, OUTPUT); // Chip select
-  pinMode(SPIDRDY, INPUT); // Data ready interrupt pin
-
-  // Reset sequence for AFE44xx
-  digitalWrite(RESET, LOW);
-  delay(500);
-  digitalWrite(RESET, HIGH);
-  delay(500);
-  digitalWrite(PWDN, LOW);
-  delay(500);
-  digitalWrite(PWDN, HIGH);
-  delay(500);
-
-  // Attach interrupt to DRDY pin
-  attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING);
-
-  // SPI configuration
-  SPI.setClockDivider(SPI_CLOCK_DIV8); // SPI clock: 2 MHz
-  SPI.setDataMode(SPI_MODE1);          // SPI Mode 1
-  SPI.setBitOrder(MSBFIRST);           // MSB first transmission
-
-  // --- Data packet headers (for future serial communication, if needed) ---
-  DataPacketHeader[0] = CES_CMDIF_PKT_START_1;  // 0x0A
-  DataPacketHeader[1] = CES_CMDIF_PKT_START_2;  // 0xFA
-  DataPacketHeader[2] = datalen;                // Data length
-  DataPacketHeader[3] = (uint8_t)(datalen >> 8);
-  DataPacketHeader[4] = CES_CMDIF_TYPE_DATA;
-
-  DataPacketFooter[0] = 0x00;
-  DataPacketFooter[1] = CES_CMDIF_PKT_STOP;
-
-  // --- Sensor Initialization ---
-  afe44xxInit();
-
-  Serial.println("AFE44xx initialization complete.");
+  // state behavior
+  if (fsm.getState() == &fsmStates[1]) {
+    transmitData();
+  } else if (fsm.getState() == &fsmStates[2]) {
+    bufferData();
+  }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void getAndSendPPG(int n_buffer_count, unsigned long long real_time)
-{
-    // Prepare a JSON payload string
-    time_stamp = ((start_epoch_time * 1000) + (real_time - start_milli_time));
-    char PPG_data[1500];
-
-    // String payload = "{";
-    // payload += "\"ts\": ";
-    // char buffer[20];
-    // sprintf(buffer, "%llu", time_stamp);
-    // payload += buffer;
-    // payload += ",";
-    // payload += "\"values\": ";
-    // payload += "{";
-    // payload += "\"PPG_IR\": "; payload += aun_ir_buffer[n_buffer_count]; payload += ",";
-    // payload += "\"PPG_R\":"; payload += aun_red_buffer[n_buffer_count];
-    // payload += "}";
-    // payload += "}";
-
-    current_R = aun_red_buffer[n_buffer_count];
-    current_IR = aun_ir_buffer[n_buffer_count];
-
-
-    // Serial.println(payload);
-
-    // Serial.print(time_stamp);
-    // Serial.print(",");
-    // Serial.print(aun_ir_buffer[n_buffer_count]);
-    // Serial.print(",");
-    // Serial.println(aun_red_buffer[n_buffer_count]);
-    // payload.toCharArray(PPG_data, 1500);
-    // tb.sendTelemetryJson(PPG_data);
-
-    // DynamicJsonDocument doc(1500); // Define the JsonDocument size
-    // deserializeJson(doc, payload); // Parse the payload string into the JsonDocument
-
-    // size_t json_size = measureJson(doc); // Get the size of the JsonDocument
-    // bool result = tb.sendTelemetryJson(doc, json_size);
-    // Serial.println(result);
-
-
-    //save data for PLX-DAQ serial monitor
-    //Serial.print("DATA,DATE,TIME,");
-    //Serial.print(ts);
-    //Serial.print(",");
-    //Serial.print(aun_ir_buffer[n_buffer_count]);
-    //Serial.print(",");
-    //Serial.print(aun_red_buffer[n_buffer_count]);
-    //Serial.println(",");
+// ─── TELEMETRY HELPERS ──────────────────────────────────────────────────────
+TelemetryData getCurrentTelemetry() {
+  TelemetryData t;
+  t.n_spo2           = calculated_SpO2;
+  t.ch_spo2_valid    = valid_flag;
+  t.n_heart_rate     = calculated_HR;
+  t.ch_hr_valid      = valid_flag;
+  t.measurement_time = start_epoch_time*1000ULL + (millis()-start_milli_time);
+  t.PPG_R            = aun_red_buffer[n_buffer_count-1];
+  t.PPG_IR           = aun_ir_buffer[n_buffer_count-1];
+  return t;
 }
 
-
-//void InitWiFi()
-//{
-//  Serial.println("Connecting to AP ...");
-// attempt to connect to WiFi network
-
-//WiFi.begin(WIFI_AP, WIFI_PASSWORD);
-//while (WiFi.status() != WL_CONNECTED) {
-//delay(500);
-//    Serial.print(".");
-// }
-//  Serial.println("Connected to AP");
-//}
-
-// void printArray(int32_t  *arr, char *name, int32_t size_n) {
-//     Serial.print(name);
-//     Serial.print( " = [");
-//     for (size_t i = 0; i < size_n; ++i) {
-//         Serial.print(arr[i]);
-//         if (i < size_n - 1) {
-//             Serial.print(", ");
-//         }
-//     }
-//     Serial.println( "]");
-// }
-
-
-// void reconnect() {
-//     // Loop until we're reconnected
-//     while (!tb.connected()) {
-//         status = WiFi.status();
-//         //if ( status != WL_CONNECTED) {
-//         //WiFi.begin(WIFI_AP, WIFI_PASSWORD);
-//         //while (WiFi.status() != WL_CONNECTED) {
-//         //delay(500);
-// //        Serial.print(".");
-//         //}
-//         //Serial.println("Connected to AP");
-//         //}
-//         Serial.print(status);
-//         Serial.print("Connecting to ThingsBoard node ...");
-//         Serial.print(THINGSBOARD_SERVER);
-//         Serial.print(TOKEN);
-//         if ( tb.connect(THINGSBOARD_SERVER, TOKEN) ) {
-//             Serial.println( "[DONE]" );
-//         }
-//         else {
-//             Serial.print( "[FAILED]" );
-//             // Serial.println(tb.getError());
-//             Serial.println( " : retrying in 5 seconds]" );
-//             // Wait 5 seconds before retrying
-//             delay( 5000 );
-//         }
-//     }
-// }
-
-////////////////AFE44xx initialization//////////////////////////////////////////
-void afe44xxInit (void)
-{
-    //  Serial.println("afe44xx Initialization Starts");
-    afe44xxWrite(CONTROL0, 0x000000);
-
-    afe44xxWrite(CONTROL0, 0x000008);
-
-    afe44xxWrite(TIAGAIN, 0x000000); // CF = 5pF, RF = 500kR
-    afe44xxWrite(TIA_AMB_GAIN, 0x000001);
-
-    afe44xxWrite(LEDCNTRL, 0x001414);
-    afe44xxWrite(CONTROL2, 0x000000); // LED_RANGE=100mA, LED=50mA
-    afe44xxWrite(CONTROL1, 0x010707); // Timers ON, average 3 samples
-
-    afe44xxWrite(PRPCOUNT, 0X001F3F);
-
-    afe44xxWrite(LED2STC, 0X001770);
-    afe44xxWrite(LED2ENDC, 0X001F3E);
-    afe44xxWrite(LED2LEDSTC, 0X001770);
-    afe44xxWrite(LED2LEDENDC, 0X001F3F);
-    afe44xxWrite(ALED2STC, 0X000000);
-    afe44xxWrite(ALED2ENDC, 0X0007CE);
-    afe44xxWrite(LED2CONVST, 0X000002);
-    afe44xxWrite(LED2CONVEND, 0X0007CF);
-    afe44xxWrite(ALED2CONVST, 0X0007D2);
-    afe44xxWrite(ALED2CONVEND, 0X000F9F);
-
-    afe44xxWrite(LED1STC, 0X0007D0);
-    afe44xxWrite(LED1ENDC, 0X000F9E);
-    afe44xxWrite(LED1LEDSTC, 0X0007D0);
-    afe44xxWrite(LED1LEDENDC, 0X000F9F);
-    afe44xxWrite(ALED1STC, 0X000FA0);
-    afe44xxWrite(ALED1ENDC, 0X00176E);
-    afe44xxWrite(LED1CONVST, 0X000FA2);
-    afe44xxWrite(LED1CONVEND, 0X00176F);
-    afe44xxWrite(ALED1CONVST, 0X001772);
-    afe44xxWrite(ALED1CONVEND, 0X001F3F);
-
-    afe44xxWrite(ADCRSTCNT0, 0X000000);
-    afe44xxWrite(ADCRSTENDCT0, 0X000000);
-    afe44xxWrite(ADCRSTCNT1, 0X0007D0);
-    afe44xxWrite(ADCRSTENDCT1, 0X0007D0);
-    afe44xxWrite(ADCRSTCNT2, 0X000FA0);
-    afe44xxWrite(ADCRSTENDCT2, 0X000FA0);
-    afe44xxWrite(ADCRSTCNT3, 0X001770);
-    afe44xxWrite(ADCRSTENDCT3, 0X001770);
-
-    delay(1000);
-//  Serial.println("afe44xx Initialization Done");
+void transmitData() {
+  Message m;
+  m.cmd = DATA;
+  sendBuffer[bufferIndex++] = getCurrentTelemetry();
+  if (bufferIndex >= 6) {
+    memcpy(m.payload.telemetry, sendBuffer, sizeof(sendBuffer));
+    esp_now_send(receiverAddress,(uint8_t*)&m,sizeof(m));
+    bufferIndex = 0;
+  }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void afe44xxWrite (uint8_t address, uint32_t data)
-{
-    digitalWrite (SS, LOW); // enable device
-    SPI.transfer (address); // send address to device
-    SPI.transfer ((data >> 16) & 0xFF); // write top 8 bits
-    SPI.transfer ((data >> 8) & 0xFF); // write middle 8 bits
-    SPI.transfer (data & 0xFF); // write bottom 8 bits
-    digitalWrite (SS, HIGH); // disable device
+void bufferData() {
+  sendBuffer[bufferIndex++] = getCurrentTelemetry();
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-unsigned long afe44xxRead (uint8_t address)
-{
-    unsigned long data = 0;
-    digitalWrite (SS, LOW); // enable device
-    SPI.transfer (address); // send address to device
-    //SPI.transfer (data);
-    data |= ((unsigned long)SPI.transfer (0) << 16); // read top 8 bits data
-    data |= ((unsigned long)SPI.transfer (0) << 8); // read middle 8 bits  data
-    data |= SPI.transfer (0); // read bottom 8 bits data
-    digitalWrite (SS, HIGH); // disable device
-
-
-    return data; // return with 24 bits of read data
+// ─── AFE44xx I/O ────────────────────────────────────────────────────────────
+void afe44xxInit() {
+  afe44xxWrite(CONTROL0,     0x000000);
+  afe44xxWrite(CONTROL0,     0x000008);
+  afe44xxWrite(TIAGAIN,      0x000000);
+  afe44xxWrite(TIA_AMB_GAIN, 0x000001);
+  afe44xxWrite(LEDCNTRL,     0x001414);
+  afe44xxWrite(CONTROL2,     0x000000);
+  afe44xxWrite(CONTROL1,     0x010707);
+  afe44xxWrite(PRPCOUNT,     0x001F3F);
+  afe44xxWrite(LED2STC,      0x001770);
+  afe44xxWrite(LED2ENDC,     0x001F3E);
+  afe44xxWrite(LED2LEDSTC,   0x001770);
+  afe44xxWrite(LED2LEDENDC,  0x001F3F);
+  afe44xxWrite(ALED2STC,     0x000000);
+  afe44xxWrite(ALED2ENDC,    0x0007CE);
+  afe44xxWrite(LED2CONVST,   0x000002);
+  afe44xxWrite(LED2CONVEND,  0x0007CF);
+  afe44xxWrite(ALED2CONVST,  0x0007D2);
+  afe44xxWrite(ALED2CONVEND, 0x000F9F);
+  afe44xxWrite(LED1STC,      0x0007D0);
+  afe44xxWrite(LED1ENDC,     0x000F9E);
+  afe44xxWrite(LED1LEDSTC,   0x0007D0);
+  afe44xxWrite(LED1LEDENDC,  0x000F9F);
+  afe44xxWrite(ALED1STC,     0x000FA0);
+  afe44xxWrite(ALED1ENDC,    0x00176E);
+  afe44xxWrite(LED1CONVST,   0x000FA2);
+  afe44xxWrite(LED1CONVEND,  0x00176F);
+  afe44xxWrite(ALED1CONVST,  0x001772);
+  afe44xxWrite(ALED1CONVEND, 0x001F3F);
+  afe44xxWrite(ADCRSTCNT0,   0x000000);
+  afe44xxWrite(ADCRSTENDCT0, 0x000000);
+  afe44xxWrite(ADCRSTCNT1,   0x0007D0);
+  afe44xxWrite(ADCRSTENDCT1, 0x0007D0);
+  afe44xxWrite(ADCRSTCNT2,   0x000FA0);
+  afe44xxWrite(ADCRSTENDCT2, 0x000FA0);
+  afe44xxWrite(ADCRSTCNT3,   0x001770);
+  afe44xxWrite(ADCRSTENDCT3, 0x001770);
+  delay(100);
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void sort_ascend(int32_t  *pn_x, int32_t n_size)
-/**
-  \brief        Sort array
-  \par          Details
-                Sort array in ascending order (insertion sort algorithm)
-
-  \retval       None
-*/
-{
-    int32_t i, j, n_temp;
-    for (i = 1; i < n_size; i++) {
-        n_temp = pn_x[i];
-        for (j = i; j > 0 && n_temp < pn_x[j - 1]; j--)
-            pn_x[j] = pn_x[j - 1];
-        pn_x[j] = n_temp;
-    }
-}
-void find_peak_above( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height )
-/**
-  \brief        Find peaks above n_min_height
-  \par          Details
-                Find all peaks above MIN_HEIGHT
-
-  \retval       None
-*/
-{
-    int32_t i = 1, n_width;
-    *n_npks = 0;
-
-    while (i < n_size - 1) {
-        if (pn_x[i] > n_min_height && pn_x[i] > pn_x[i - 1]) {   // find left edge of potential peaks
-            n_width = 1;
-            while (i + n_width < n_size && pn_x[i] == pn_x[i + n_width]) // find flat peaks
-                n_width++;
-            if (pn_x[i] > pn_x[i + n_width] && (*n_npks) < 15 ) {   // find right edge of peaks
-                pn_locs[(*n_npks)++] = i;
-                // for flat peaks, peak location is left edge
-                i += n_width + 1;
-            }
-            else
-                i += n_width;
-        }
-        else
-            i++;
-        //  Serial.println("beat");
-    }
+void afe44xxWrite(uint8_t addr, uint32_t data) {
+  digitalWrite(SPISTE, LOW);
+  SPI.transfer(addr);
+  SPI.transfer((data>>16)&0xFF);
+  SPI.transfer((data>>8)&0xFF);
+  SPI.transfer(data&0xFF);
+  digitalWrite(SPISTE, HIGH);
 }
 
-void sort_indices_descend(  int32_t  *pn_x, int32_t *pn_indx, int32_t n_size)
-/**
-  \brief        Sort indices
-  \par          Details
-                Sort indices according to descending order (insertion sort algorithm)
-
-  \retval       None
-*/
-{
-    int32_t i, j, n_temp;
-    for (i = 1; i < n_size; i++) {
-        n_temp = pn_indx[i];
-        for (j = i; j > 0 && pn_x[n_temp] > pn_x[pn_indx[j - 1]]; j--)
-            pn_indx[j] = pn_indx[j - 1];
-        pn_indx[j] = n_temp;
-    }
+uint32_t afe44xxRead(uint8_t addr) {
+  uint32_t r=0;
+  digitalWrite(SPISTE, LOW);
+  SPI.transfer(addr);
+  r  = ((uint32_t)SPI.transfer(0)<<16);
+  r |= ((uint32_t)SPI.transfer(0)<<8);
+  r |=  SPI.transfer(0);
+  digitalWrite(SPISTE, HIGH);
+  return r;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void remove_close_peaks(int32_t *pn_locs, int32_t *pn_npks, int32_t *pn_x, int32_t n_min_distance)
-/**
-  \brief        Remove peaks
-  \par          Details
-                Remove peaks separated by less than MIN_DISTANCE
-
-  \retval       None
-*/
-{
-
-    int32_t i, j, n_old_npks, n_dist;
-
-    /* Order peaks from large to small */
-    sort_indices_descend( pn_x, pn_locs, *pn_npks );
-
-    for ( i = -1; i < *pn_npks; i++ ) {
-        n_old_npks = *pn_npks;
-        *pn_npks = i + 1;
-        for ( j = i + 1; j < n_old_npks; j++ ) {
-            n_dist =  pn_locs[j] - ( i == -1 ? -1 : pn_locs[i] ); // lag-zero peak of autocorr is at index -1
-            if ( n_dist > n_min_distance || n_dist < -n_min_distance )
-                pn_locs[(*pn_npks)++] = pn_locs[j];
-        }
-    }
-
-    // Resort indices int32_to ascending order
-    sort_ascend( pn_locs, *pn_npks );
+// ─── SPO₂ ESTIMATION ROUTINES ────────────────────────────────────────────────
+void sort_ascend(int32_t *x, int n) {
+  for(int i=1;i<n;++i){
+    int32_t v=x[i], j=i;
+    while(j>0 && v<x[j-1]){ x[j]=x[j-1]; --j; }
+    x[j]=v;
+  }
 }
 
-void find_peak( int32_t *pn_locs, int32_t *n_npks,  int32_t  *pn_x, int32_t n_size, int32_t n_min_height, int32_t n_min_distance, int32_t n_max_num )
-/**
-  \brief        Find peaks
-  \par          Details
-                Find at most MAX_NUM peaks above MIN_HEIGHT separated by at least MIN_DISTANCE
-
-  \retval       None
-*/
-{
-    // printArray(pn_x, "Data Values", n_size);
-    find_peak_above( pn_locs, n_npks, pn_x, n_size, n_min_height );
-    // printArray(pn_locs, "Peaks Above", *n_npks);
-    remove_close_peaks( pn_locs, n_npks, pn_x, n_min_distance );
-    // printArray(pn_locs, "Peaks Remove Close", *n_npks);
-    *n_npks = min( *n_npks, n_max_num );
+void find_peak_above(int32_t *locs,int32_t *npk,int32_t *x,int n,int minh){
+  *npk=0; int i=1;
+  while(i<n-1){
+    if(x[i]>minh && x[i]>x[i-1]){
+      int w=1; while(i+w<n && x[i]==x[i+w]) w++;
+      if(i+w<n && x[i]>x[i+w] && *npk<15){
+        locs[(*npk)++]=i; i+=w+1;
+      } else i+=w;
+    } else i++;
+  }
 }
 
-
-void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t *pun_red_buffer, int32_t *pn_spo2, int8_t *pch_spo2_valid, int32_t *pn_heart_rate, int8_t *pch_hr_valid , unsigned long *ts_arr)
-{
-    uint32_t un_ir_mean, un_only_once ;
-    int32_t k, n_i_ratio_count;
-    int32_t i, s, m, n_exact_ir_valley_locs_count, n_middle_idx;
-    int32_t n_th1, n_npks, n_c_min;
-    int32_t an_ir_valley_locs[15] ;
-    int32_t n_peak_interval_sum;
-
-    int32_t n_y_ac, n_x_ac;
-    int32_t n_spo2_calc;
-    int32_t n_y_dc_max, n_x_dc_max;
-    int32_t n_y_dc_max_idx, n_x_dc_max_idx;
-    int32_t an_ratio[5], n_ratio_average;
-    int32_t n_nume, n_denom ;
-
-    // calculates DC mean and subtract DC from ir
-    un_ir_mean = 0;
-    for (k = 0 ; k < n_ir_buffer_length ; k++ ) un_ir_mean += pun_ir_buffer[k] ;
-    un_ir_mean = un_ir_mean / n_ir_buffer_length ;
-
-    // remove DC and invert signal so that we can use peak detector as valley detector
-    for (k = 0 ; k < n_ir_buffer_length ; k++ )
-        an_x[k] = -1 * (pun_ir_buffer[k] - un_ir_mean) ;
-
-    // 4 pt Moving Average
-    for (k = 0; k < BUFFER_SIZE - MA4_SIZE; k++) {
-        an_x[k] = ( an_x[k] + an_x[k + 1] + an_x[k + 2] + an_x[k + 3]) / (int)4;
-    }
-    // calculate threshold
-    n_th1 = 0;
-    for ( k = 0 ; k < BUFFER_SIZE ; k++) {
-        n_th1 +=  an_x[k];
-    }
-    n_th1 =  n_th1 / ( BUFFER_SIZE);
-    if ( n_th1 < 30) n_th1 = 30; // min allowed
-    if ( n_th1 > 60) n_th1 = 60; // max allowed
-
-    for ( k = 0 ; k < 15; k++) an_ir_valley_locs[k] = 0;
-    // since we flipped signal, we use peak detector as valley detector
-    find_peak( an_ir_valley_locs, &n_npks, an_x, BUFFER_SIZE, n_th1, 4, 15 );//peak_height, peak_distance, max_num_peaks
-    n_peak_interval_sum = 0;
-    if (n_npks >= 2) {
-        for (k = 1; k < n_npks; k++) n_peak_interval_sum += (ts_arr[an_ir_valley_locs[k]] - ts_arr[an_ir_valley_locs[k - 1]]) ;
-        n_peak_interval_sum = n_peak_interval_sum / (n_npks - 1);
-        *pn_heart_rate = (int32_t)( (60000) / n_peak_interval_sum );
-        *pch_hr_valid  = 1;
-        calculated_HR = (int32_t)( (60000) / n_peak_interval_sum );
-        valid_flag = 1;
-    }
-    else  {
-        *pn_heart_rate = -999; // unable to calculate because # of peaks are too small
-        *pch_hr_valid  = 0;
-
-        valid_flag = 0;
-    }
-
-    //  load raw value again for SPO2 calculation : RED(=y) and IR(=X)
-    for (k = 0 ; k < n_ir_buffer_length ; k++ )  {
-        an_x[k] =  pun_ir_buffer[k] ;
-        an_y[k] =  pun_red_buffer[k] ;
-    }
-
-    // find precise min near an_ir_valley_locs
-    n_exact_ir_valley_locs_count = n_npks;
-
-    //using exact_ir_valley_locs , find ir-red DC andir-red AC for SPO2 calibration an_ratio
-    //finding AC/DC maximum of raw
-
-    n_ratio_average = 0;
-    n_i_ratio_count = 0;
-    for (k = 0; k < 5; k++) an_ratio[k] = 0;
-    for (k = 0; k < n_exact_ir_valley_locs_count; k++) {
-        if (an_ir_valley_locs[k] > BUFFER_SIZE ) {
-            *pn_spo2 =  -999 ; // do not use SPO2 since valley loc is out of range
-            *pch_spo2_valid  = 0;
-            return;
-        }
-    }
-    // find max between two valley locations
-    // and use an_ratio betwen AC compoent of Ir & Red and DC compoent of Ir & Red for SPO2
-    for (k = 0; k < n_exact_ir_valley_locs_count - 1; k++) {
-        n_y_dc_max = -16777216 ;
-        n_x_dc_max = -16777216;
-        if (an_ir_valley_locs[k + 1] - an_ir_valley_locs[k] > 3) {
-            for (i = an_ir_valley_locs[k]; i < an_ir_valley_locs[k + 1]; i++) {
-                if (an_x[i] > n_x_dc_max) {
-                    n_x_dc_max = an_x[i];
-                    n_x_dc_max_idx = i;
-                }
-                if (an_y[i] > n_y_dc_max) {
-                    n_y_dc_max = an_y[i];
-                    n_y_dc_max_idx = i;
-                }
-            }
-            n_y_ac = (an_y[an_ir_valley_locs[k + 1]] - an_y[an_ir_valley_locs[k] ] ) * (n_y_dc_max_idx - an_ir_valley_locs[k]); //red
-            n_y_ac =  an_y[an_ir_valley_locs[k]] + n_y_ac / (an_ir_valley_locs[k + 1] - an_ir_valley_locs[k])  ;
-            n_y_ac =  an_y[n_y_dc_max_idx] - n_y_ac;   // subracting linear DC compoenents from raw
-            n_x_ac = (an_x[an_ir_valley_locs[k + 1]] - an_x[an_ir_valley_locs[k] ] ) * (n_x_dc_max_idx - an_ir_valley_locs[k]); // ir
-            n_x_ac =  an_x[an_ir_valley_locs[k]] + n_x_ac / (an_ir_valley_locs[k + 1] - an_ir_valley_locs[k]);
-            n_x_ac =  an_x[n_y_dc_max_idx] - n_x_ac;     // subracting linear DC compoenents from raw
-            n_nume = ( n_y_ac * n_x_dc_max) >> 7 ; //prepare X100 to preserve floating value
-            n_denom = ( n_x_ac * n_y_dc_max) >> 7;
-            if (n_denom > 0  && n_i_ratio_count < 5 &&  n_nume != 0)
-            {
-                an_ratio[n_i_ratio_count] = (n_nume * 100) / n_denom ; //formular is ( n_y_ac *n_x_dc_max) / ( n_x_ac *n_y_dc_max) ;
-                n_i_ratio_count++;
-            }
-        }
-    }
-    // choose median value since PPG signal may varies from beat to beat
-    sort_ascend(an_ratio, n_i_ratio_count);
-    n_middle_idx = n_i_ratio_count / 2;
-
-    if (n_middle_idx > 1)
-        n_ratio_average = ( an_ratio[n_middle_idx - 1] + an_ratio[n_middle_idx]) / 2; // use median
-    else
-        n_ratio_average = an_ratio[n_middle_idx ];
-
-    if ( n_ratio_average > 2 && n_ratio_average < 184) {
-        n_spo2_calc = uch_spo2_table[n_ratio_average] ;
-        *pn_spo2 = n_spo2_calc ;
-        *pch_spo2_valid  = 1;//  float_SPO2 =  -45.060*n_ratio_average* n_ratio_average/10000 + 30.354 *n_ratio_average/100 + 94.845 ;  // for comparison with table
-        calculated_SpO2= n_spo2_calc;
-        valid_flag = 1;
-    }
-    else {
-        *pn_spo2 =  -999 ; // do not use SPO2 since signal an_ratio is out of range
-        *pch_spo2_valid  = 0;
-
-        calculated_SpO2 = -999;
-        valid_flag = 0;
-    }
+void sort_indices_descend(int32_t *x,int32_t *ind,int n){
+  for(int i=1;i<n;++i){
+    int t=ind[i], j=i;
+    while(j>0 && x[t]>x[ind[j-1]]){ ind[j]=ind[j-1]; --j; }
+    ind[j]=t;
+  }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-double ReadVoltage(uint8_t pin){
-    double reading = analogRead(pin); // Reference voltage is 3v3 so maximum reading is 3v3 = 4095 in range 0 to 4095
-    if(reading < 1 || reading > 4095) return 0;
-    //return (-0.000000000000016 * pow(reading,4) + 0.000000000118171 * pow(reading,3)- 0.000000301211691 * pow(reading,2)+ 0.001109019271794 * reading + 0.034143524634089)*2; //original fir from creator
-    return (-.0000000000000096795072211912461* pow(reading,4) + .000000000064564581092594387 * pow(reading,3) - .00000014328287130333392 * pow(reading,2)+ .00090565621090209041 * reading + .11253959753849530)*2;
+void remove_close_peaks(int32_t *locs,int32_t *npk,int32_t *x,int mind){
+  int old=*npk;
+  sort_indices_descend(x,locs,*npk);
+  int out=0;
+  for(int i=0;i<old;++i){
+    bool keep=true;
+    for(int j=0;j<out;++j){
+      if(abs(locs[i]-locs[j])<mind){ keep=false; break; }
+    }
+    if(keep) locs[out++]=locs[i];
+  }
+  *npk=out;
+  sort_ascend(locs,out);
 }
 
-void LEDFunction (int battStatus){
-    switch(battStatus){
-        case 0: //Battery criticially low (less than 33%)
-        {
-            if(elapsed_time_LED > 1000){
-                // if the LED is off turn it on and vice-versa:
-                ledState = (ledState == LOW) ? HIGH : LOW;
-
-                // set the LED with the ledState of the variable:
-                digitalWrite(GRN_LED, LOW);
-                digitalWrite(RED_LED, ledState);
-                previous_time_LED = millis();
-            }
-            break;
-        }
-        case 1: //Battery < 66%
-        {
-            if(elapsed_time_LED > 1000){
-                // if the LED is off turn it on and vice-versa:
-                ledState = (ledState == LOW) ? HIGH : LOW;
-
-                // set the LED with the ledState of the variable:
-                digitalWrite(GRN_LED, ledState);
-                digitalWrite(RED_LED, ledState);
-                previous_time_LED = millis();
-            }
-            break;
-        }
-        case 2: //Battery > 66%
-        {
-            if(elapsed_time_LED > 2000){
-                // if the LED is off turn it on and vice-versa:
-                ledState = (ledState == LOW) ? HIGH : LOW;
-
-                // set the LED with the ledState of the variable:
-                digitalWrite(GRN_LED, ledState);
-                digitalWrite(RED_LED, LOW);
-                previous_time_LED = millis();
-            }
-            break;
-        }
-        default:
-            break;
-    }
+void find_peak(int32_t *locs,int32_t *npk,int32_t *x,int n,int minh,int mind,int maxn){
+  find_peak_above(locs,npk,x,n,minh);
+  remove_close_peaks(locs,npk,x,mind);
+  if(*npk>maxn)*npk=maxn;
 }
 
+const uint8_t uch_spo2_table[184]={95,95,95,96,96,96,97,97,97,97,97,98,98,98,98,98,99,99,99,99,
+  99,99,99,99,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,
+  100,100,100,100,99,99,99,99,99,99,99,99,98,98,98,98,98,98,97,97,
+  97,97,96,96,96,96,95,95,95,94,94,94,93,93,93,92,92,92,91,91,
+  90,90,89,89,89,88,88,87,87,86,86,85,85,84,84,83,82,82,81,81,
+  80,80,79,78,78,77,76,76,75,74,74,73,72,72,71,70,69,69,68,67,
+  66,66,65,64,63,62,62,61,60,59,58,57,56,56,55,54,53,52,51,50,
+  49,48,47,46,45,44,43,42,41,40,39,38,37,36,35,34,33,31,30,29,
+  28,27,26,25,23,22,21,20,19,17,16,15,14,12,11,10,9,7,6,5,3,2,1};
 
-
-void loop()
-{
-    // Portal.handleClient();
-    // timeClient.update();
-
-    // if (!tb.connected()) {
-    //     // Connect to the ThingsBoard
-    //     Serial.print("Connecting to: ");
-    //     Serial.print(THINGSBOARD_SERVER);
-    //     Serial.print(" with token ");
-    //     Serial.println(TOKEN);
-    //     if (!tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT)) {
-    //         Serial.println("Failed to connect");
-    //         return;
-    //     }
-    // }
-    //voltage read
-    voltage = ReadVoltage(BATTERY_IN);//ADC to voltage conversion
-    percentage = 2808.3808*pow(voltage,4)-43560.9157*pow(voltage,3)+252848.5888*pow(voltage,2)-650767.4615*voltage+626532.5703; //curve fit of LiPo
-    if(voltage > 4.19) percentage = 100; //upper limit
-    if(voltage < 3.5) percentage = 0; //Lower limit
-
-    // Charge logic
-    if(voltage > 4.1) digitalWrite(CHARGER, LOW);
-    if(voltage < 3.9) digitalWrite(CHARGER,HIGH);
-
-    // To make the battery ot workl
-    // digitalWrite(CHARGER, LOW);
-
-    if(percentage < 33){
-        battStatus = 0;
-    }else if(percentage < 66){
-        battStatus = 1;
-    }else{
-        battStatus = 2;
+void estimate_spo2(uint16_t *irbuf,int len,uint16_t *redbuf,
+                   int32_t *spo2,int8_t *spov,int32_t *hr,int8_t *hrv,
+                   uint64_t *ts){
+  // DC removal + moving avg, valley detection, HR calc
+  int32_t x[BUFFER_SIZE], y[BUFFER_SIZE];
+  uint32_t sum=0;
+  for(int i=0;i<len;++i) sum+=irbuf[i];
+  uint32_t mean=sum/len;
+  for(int i=0;i<len;++i) x[i]=-(int32_t)(irbuf[i]-mean);
+  for(int i=0;i<BUFFER_SIZE-MA4_SIZE;++i)
+    x[i]=(x[i]+x[i+1]+x[i+2]+x[i+3])/4;
+  int32_t th=0;
+  for(int i=0;i<BUFFER_SIZE;++i) th+=x[i];
+  th/=BUFFER_SIZE; th=min(max(th,30),60);
+  int32_t locs[15], npk;
+  find_peak(locs,&npk,x,BUFFER_SIZE,th,4,15);
+  if(npk>=2){
+    int sumt=0;
+    for(int i=1;i<npk;++i)
+      sumt+=ts[locs[i]]-ts[locs[i-1]];
+    *hr=60000/(sumt/(npk-1));
+    *hrv=1; calculated_HR=*hr;
+  } else {*hr=-999; *hrv=0; valid_flag=0;}
+  // SPO2
+  for(int i=0;i<len;++i){ x[i]=irbuf[i]; y[i]=redbuf[i]; }
+  int ratios[5], rc=0;
+  for(int k=0;k<npk-1;++k){
+    int start=locs[k], end=locs[k+1];
+    if(end-start<4) continue;
+    int xdc=-1e9, ydc=-1e9, xi=0, yi=0;
+    for(int i=start;i<=end;++i){
+      if(x[i]>xdc){ xdc=x[i]; xi=i; }
+      if(y[i]>ydc){ ydc=y[i]; yi=i; }
     }
-
-    current_time_LED = millis();                              //get current time for LED function
-    elapsed_time_LED = current_time_LED - previous_time_LED;  //calculate elapsed time for LED function
-    LEDFunction(battStatus);
-
-    // if ( !tb.connected() ) {
-    //   reconnect();
-    // }
-
-    if (drdy_trigger == HIGH)
-    {
-        //Serial.println("111111111xxxxxxx!!!");
-        detachInterrupt(SPIDRDY);
-        afe44xxWrite(CONTROL0, 0x000001);
-        IRtemp = afe44xxRead(LED1VAL);
-        afe44xxWrite(CONTROL0, 0x000001);
-        REDtemp = afe44xxRead(LED2VAL);
-        afe44xx_data_ready = true;
+    float xr   = (float)(x[end]-x[start])*(xi-start)/(end-start) + x[start];
+    float yr   = (float)(y[end]-y[start])*(yi-start)/(end-start) + y[start];
+    float xac  = x[xi]-xr, yac=y[yi]-yr;
+    if(xdc>0 && ydc>0){
+      int r = (int)((yac*(float)xdc)/(xac*(float)ydc)*100);
+      if(r>2 && r<184 && rc<5) ratios[rc++]=r;
     }
+  }
+  sort_ascend(ratios,rc);
+  int mid=rc/2;
+  int rav= (rc>1)?(ratios[mid-1]+ratios[mid])/2:ratios[mid];
+  if(rav>2 && rav<184){
+    *spo2=uch_spo2_table[rav];
+    *spov=1; calculated_SpO2=*spo2;
+  } else {*spo2=-999; *spov=0; calculated_SpO2=-999;}
+}
 
-    if (afe44xx_data_ready == true)
-    {
-        //Serial.println("xxxxxxx!!!");
-        IRtemp = (unsigned long) (IRtemp << 10);
-        seegtemp = (signed long) (IRtemp);
-        seegtemp = (signed long) (seegtemp >> 10);
-
-        REDtemp = (unsigned long) (REDtemp << 10);
-        seegtemp2 = (signed long) (REDtemp);
-        seegtemp2 = (signed long) (seegtemp2 >> 10);
-
-
-        if (dec == 20)
-        {
-            //Serial.println("xoxoxo!!!");
-            aun_ir_buffer[n_buffer_count] = (uint16_t) (seegtemp >> 4);
-            aun_red_buffer[n_buffer_count] = (uint16_t) (seegtemp2 >> 4);
-            time_stamps[n_buffer_count] = millis();
-            //send data to Thingsboard
-            getAndSendPPG(n_buffer_count, time_stamps[n_buffer_count]);
-            n_buffer_count++;
-            dec = 0;
-
-        }
-        dec++;
-
-        if (n_buffer_count > 99)
-        {
-            // Serial.println("xasdasdx!!!");
-            estimate_spo2(aun_ir_buffer, 100, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, time_stamps);
-           
-            n_buffer_count = 0;
-        }
-        if (current_state == TRANSMITTING) {transmitData(); Serial.println("Transmtting ");}
-        else if (current_state == WAITING) {bufferData(); Serial.println("Buffering ");}
-
-        afe44xx_data_ready = false;
-        drdy_trigger = LOW;
-        attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING );
-        // tb.loop();
-    }
-        }
+// ─── END OF SKETCH ───────────────────────────────────────────────────────────
