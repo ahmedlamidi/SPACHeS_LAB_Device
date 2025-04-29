@@ -9,7 +9,7 @@
 #include <Arduino_MQTT_Client.h>
 #include <ThingsBoard.h>
 
-#include "fsm.hpp"  // <-- FSM library you want!
+#include <fsm.h>
 
 // ----------- NTP Setup -------------
 #define NTP_OFFSET   0 * 60
