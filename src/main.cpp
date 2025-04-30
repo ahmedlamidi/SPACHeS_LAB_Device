@@ -91,10 +91,12 @@ struct TelemetryData {
   uint16_t PPG_R;
   uint16_t PPG_IR;
 };
+
 union Payload {
   uint64_t      timestamp;
   TelemetryData telemetry[6];
 };
+
 struct Message {
   MsgCmd  cmd;
   Payload payload;
@@ -195,7 +197,9 @@ void setup() {
   digitalWrite(RED_LED, HIGH);
 
   // ESP-NOW
+
   WiFi.mode(WIFI_STA);
+  esp_wifi_set_channel(6, WIFI_SECOND_CHAN_NONE); // change to match receiver channel
   if (esp_now_init() != ESP_OK) {
     Serial.println("ESP-NOW init failed");
   }
@@ -203,11 +207,11 @@ void setup() {
   memcpy(peerInfo.peer_addr, receiverAddress, 6);
   peerInfo.channel = 0;
   peerInfo.encrypt = false;
-  esp_now_add_peer(&peerInfo);
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add peer");
+    return;
+}
 
-  // NTP
-  timeClient.begin();
-  timeClient.update();
 
   // SPI + AFE44xx
   pinMode(RESET_PIN, OUTPUT);
@@ -307,7 +311,15 @@ void transmitData() {
   sendBuffer[bufferIndex++] = getCurrentTelemetry();
   if (bufferIndex >= 6) {
     memcpy(m.payload.telemetry, sendBuffer, sizeof(sendBuffer));
-    esp_now_send(receiverAddress,(uint8_t*)&m,sizeof(m));
+    esp_err_t status = esp_now_send(receiverAddress,(uint8_t*)&m,sizeof(m));
+    if (status == ESP_OK){
+      Serial.println("Sent Data");
+    }
+    else{
+      Serial.println("Send Failed");
+      Serial.println(sizeof(m));
+      Serial.println(bufferIndex);
+    }
     bufferIndex = 0;
   }
 }
