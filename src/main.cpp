@@ -112,7 +112,7 @@ void processTelemetry(){
 
 
   message_information data;
-  while (dequeue(data)) {
+  if (dequeue(data)) {
     unsigned long long actual_time_stamp = data.measurement_time;
     // unsigned long long actual_time_stamp = (start_epoch_time * 1000) + millis();
   
