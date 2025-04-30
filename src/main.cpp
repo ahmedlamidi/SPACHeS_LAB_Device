@@ -31,7 +31,7 @@ int current_state = 1;
 constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
 constexpr uint16_t THINGSBOARD_PORT = 1883U;
 constexpr char TOKEN[] = "spo2_123";
-constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
+constexpr uint16_t MAX_MESSAGE_SIZE = 400U;
 unsigned long long start_epoch_time;
 unsigned long long start_milli_time = 0;
 
