@@ -760,7 +760,7 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
 
     for ( k = 0 ; k < 15; k++) an_ir_valley_locs[k] = 0;
     // since we flipped signal, we use peak detector as valley detector
-    find_peak( an_ir_valley_locs, &n_npks, an_x, BUFFER_SIZE, n_th1, 4, 15 );//peak_height, peak_distance, max_num_peaks
+    find_peak( an_ir_valley_locs, &n_npks, an_x, BUFFER_SIZE, n_th1, 10, 15 );//peak_height, peak_distance, max_num_peaks
     n_peak_interval_sum = 0;
     if (n_npks >= 2) {
         for (k = 1; k < n_npks; k++) n_peak_interval_sum += (ts_arr[an_ir_valley_locs[k]] - ts_arr[an_ir_valley_locs[k - 1]]) ;
