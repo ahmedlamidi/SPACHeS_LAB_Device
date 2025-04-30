@@ -389,7 +389,7 @@ void setup()
     attachInterrupt(SPIDRDY, afe44xx_drdy_event, FALLING); // Digital2 is attached to Data ready pin of AFE is interrupt0 in ARduino
     //   attachInterrupt(0, afe44xx_drdy_event, RISING );
     // set SPI transmission
-    SPI.setClockDivider (SPI_CLOCK_DIV8); // set Speed as 2MHz , 16MHz/ClockDiv
+    SPI.setClockDivider (SPI_CLOCK_DIV2); // set Speed as 2MHz , 16MHz/ClockDiv
     SPI.setDataMode (SPI_MODE0);          //Set SPI mode as 0
     // SPI.setDataMode (SPI_MODE1);          //Set SPI mode as 1
     SPI.setBitOrder (MSBFIRST);           //MSB first
@@ -404,7 +404,7 @@ void setup()
     DataPacketFooter[0] = 0x00;
     DataPacketFooter[1] = CES_CMDIF_PKT_STOP;
     afe44xxInit ();
-    Serial.println("initialization is done");
+    Serial.println("initialization is done");   
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
