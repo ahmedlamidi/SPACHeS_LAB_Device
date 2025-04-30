@@ -797,6 +797,7 @@ void estimate_spo2(uint16_t *pun_ir_buffer, int32_t n_ir_buffer_length, uint16_t
         if (an_ir_valley_locs[k] > BUFFER_SIZE ) {
             *pn_spo2 =  -999 ; // do not use SPO2 since valley loc is out of range
             *pch_spo2_valid  = 0;
+            Data.n_spo2 = *pn_spo2;
             return;
         }
     }
