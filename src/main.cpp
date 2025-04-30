@@ -107,55 +107,61 @@ void rootPage() {
     Server.send(200, "text/plain", "ESP32 AutoConnect Setup");
 }
 
-void processTelemetry(){
+#define BATCH_SIZE 8 // Send up to 8 readings per message
+#define MAX_JSON_BUFFER_SIZE 1500 // Adjust if needed for larger batches
 
+void processTelemetry() {
+    if (isQueueEmpty()) {
+        return; // Nothing to do
+    }
 
+    // Prepare JSON array string
+    String payload = "[";
+    int itemsInBatch = 0;
+    DynamicJsonDocument doc(MAX_JSON_BUFFER_SIZE); // Use one doc for the whole batch potentially? - Requires Careful implementation or build string manually.
+    // Safer: Build string manually to avoid complex JSON manipulation for arrays
 
-  message_information data;
-  if (dequeue(data)) {
-    unsigned long long actual_time_stamp = data.measurement_time;
-    // unsigned long long actual_time_stamp = (start_epoch_time * 1000) + millis();
-  
-
-
-    String payload = "{";
-    payload += "\"ts\": ";
-    char buffer[20];
-    sprintf(buffer, "%llu", actual_time_stamp);
-    payload += buffer;
-    payload += ",";
-    payload += "\"values\":{";
-    payload += "\"SPo2\":"; payload += data.n_spo2; payload += ",";
-    payload += "\"PPG_R\":"; payload += data.PPG_R; payload += ",";
-    payload += "\"PPG_IR\":"; payload += data.PPG_IR; payload += ",";
-    payload += "\"Pulse rate\":"; payload += data.n_heart_rate;
-    payload += "}}";
-
-    Serial.println(payload); // For debug
-
-    // Send to ThingsBoard
-    DynamicJsonDocument doc(1500);
-    deserializeJson(doc, payload);
-    size_t json_size = measureJson(doc);
-    Serial.println(tb.connected());
-    if (!tb.connected()) {
-        Serial.println("Reconnecting to ThingsBoard...");
-        if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
-            Serial.println("Failed to connect to ThingsBoard!");
-            return;
+    message_information data;
+    while (itemsInBatch < BATCH_SIZE && dequeue(data)) {
+        if (itemsInBatch > 0) {
+            payload += ","; // Add comma between objects
         }
-        else{
+        payload += "{\"ts\": ";
+        payload += (unsigned long long)data.measurement_time; // Cast for String concat if needed
+        payload += ", \"values\": {";
+        payload += "\"SPo2\":"; payload += data.n_spo2; payload += ",";
+        payload += "\"PPG_R\":"; payload += data.PPG_R; payload += ",";
+        payload += "\"PPG_IR\":"; payload += data.PPG_IR; payload += ",";
+        payload += "\"Pulse rate\":"; payload += data.n_heart_rate;
+        payload += "}}";
+        itemsInBatch++;
+    }
+    payload += "]"; // Close JSON array
+    if (itemsInBatch > 0) {
+
+        DynamicJsonDocument doc(1500);
+        deserializeJson(doc, payload);
+        size_t json_size = measureJson(doc);
+
+        // Check connection and send the batch
+        if (!tb.connected()) {
+            Serial.println("Reconnecting to ThingsBoard...");
+            if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
+                Serial.println("Failed to connect to ThingsBoard!");
+                // Error Handling: Consider re-queuing failed batch data? Difficult.
+                return;
+            } else {
+                Serial.print("Sending batch data... ");
+                bool result = tb.sendTelemetryJson(doc, json_size);
+                Serial.println(result ? "OK" : "Failed");
+            }
+        } else {
+            Serial.print("Sending batch data... ");
             bool result = tb.sendTelemetryJson(doc, json_size);
-            Serial.println(result);
+            Serial.println(result ? "OK" : "Failed");
         }
     }
-    else{
-      bool result = tb.sendTelemetryJson(doc, json_size);
-            Serial.println(result);
-    }
-  }
 }
-
 void setup() {
     Serial.begin(115200);
 
