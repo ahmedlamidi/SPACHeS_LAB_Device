@@ -135,6 +135,7 @@ void processTelemetry() {
         payload += "\"Pulse rate\":"; payload += data.n_heart_rate;
         payload += "}}";
         itemsInBatch++;
+        Serial.println(payload);
     }
     payload += "]"; // Close JSON array
     if (itemsInBatch > 0) {
