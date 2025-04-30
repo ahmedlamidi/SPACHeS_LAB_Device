@@ -31,7 +31,7 @@ int current_state = 1;
 constexpr char THINGSBOARD_SERVER[] = "131.247.15.226";
 constexpr uint16_t THINGSBOARD_PORT = 1883U;
 constexpr char TOKEN[] = "spo2_123";
-constexpr uint16_t MAX_MESSAGE_SIZE = 400U;
+constexpr uint16_t MAX_MESSAGE_SIZE = 128U;
 unsigned long long start_epoch_time;
 unsigned long long start_milli_time = 0;
 
@@ -107,62 +107,36 @@ void rootPage() {
     Server.send(200, "text/plain", "ESP32 AutoConnect Setup");
 }
 
-#define BATCH_SIZE 8 // Send up to 8 readings per message
-#define MAX_JSON_BUFFER_SIZE 1500 // Adjust if needed for larger batches
+void processTelemetry(){
 
-void processTelemetry() {
-    if (isQueueEmpty()) {
-        return; // Nothing to do
-    }
 
-    // Prepare JSON array string
-    String payload = "[";
-    int itemsInBatch = 0;
-    DynamicJsonDocument doc(MAX_JSON_BUFFER_SIZE); // Use one doc for the whole batch potentially? - Requires Careful implementation or build string manually.
-    // Safer: Build string manually to avoid complex JSON manipulation for arrays
 
-    message_information data;
-    while (itemsInBatch < BATCH_SIZE && dequeue(data)) {
-        if (itemsInBatch > 0) {
-            payload += ","; // Add comma between objects
+  message_information data;
+  while (dequeue(data)) {
+    unsigned long long actual_time_stamp = data.measurement_time;
+    // unsigned long long actual_time_stamp = (start_epoch_time * 1000) + millis();
+    if (!tb.connected()) {
+        Serial.println("Reconnecting to ThingsBoard...");
+        if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
+            Serial.println("Failed to connect to ThingsBoard!");
+            return;
         }
-        payload += "{\"ts\": ";
-        payload += (unsigned long long)data.measurement_time; // Cast for String concat if needed
-        payload += ", \"values\": {";
-        payload += "\"SPo2\":"; payload += data.n_spo2; payload += ",";
-        payload += "\"PPG_R\":"; payload += data.PPG_R; payload += ",";
-        payload += "\"PPG_IR\":"; payload += data.PPG_IR; payload += ",";
-        payload += "\"Pulse rate\":"; payload += data.n_heart_rate;
-        payload += "}}";
-        itemsInBatch++;
-        Serial.println(payload);
-    }
-    payload += "]"; // Close JSON array
-    if (itemsInBatch > 0) {
-
-        DynamicJsonDocument doc(1500);
-        deserializeJson(doc, payload);
-        size_t json_size = measureJson(doc);
-
-        // Check connection and send the batch
-        if (!tb.connected()) {
-            Serial.println("Reconnecting to ThingsBoard...");
-            if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
-                Serial.println("Failed to connect to ThingsBoard!");
-                // Error Handling: Consider re-queuing failed batch data? Difficult.
-                return;
-            } else {
-                Serial.print("Sending batch data... ");
-                bool result = tb.sendTelemetryJson(doc, json_size);
-                Serial.println(result ? "OK" : "Failed");
-            }
-        } else {
-            Serial.print("Sending batch data... ");
-            bool result = tb.sendTelemetryJson(doc, json_size);
-            Serial.println(result ? "OK" : "Failed");
+        else{
+            tb.sendTelemetryData("SPo2",    data.n_spo2);
+            tb.sendTelemetryData("PPG_R",   data.PPG_R);
+            tb.sendTelemetryData("PPG_IR",  data.PPG_IR);
+            tb.sendTelemetryData("Pulse rate", data.n_heart_rate);
         }
     }
+    else{
+        tb.sendTelemetryData("SPo2",    data.n_spo2);
+        tb.sendTelemetryData("PPG_R",   data.PPG_R);
+        tb.sendTelemetryData("PPG_IR",  data.PPG_IR);
+        tb.sendTelemetryData("Pulse rate", data.n_heart_rate);
+    }
+  }
 }
+
 void setup() {
     Serial.begin(115200);
 
